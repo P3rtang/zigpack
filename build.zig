@@ -3,7 +3,7 @@ const std = @import("std");
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
 // runner.
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -29,9 +29,16 @@ pub fn build(b: *std.Build) void {
     // running `zig build`).
     b.installArtifact(lib);
 
-    const exe = b.addExecutable(.{
+    const main = b.addExecutable(.{
         .name = "p3desk",
         .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const cmd = b.addStaticLibrary(.{
+        .name = "cmd",
+        .root_source_file = .{ .path = "src/cmd/mod.zig" },
         .target = target,
         .optimize = optimize,
     });
@@ -39,12 +46,12 @@ pub fn build(b: *std.Build) void {
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
-    b.installArtifact(exe);
+    b.installArtifact(main);
 
     // This *creates* a Run step in the build graph, to be executed when another
     // step is evaluated that depends on it. The next line below will establish
     // such a dependency.
-    const run_cmd = b.addRunArtifact(exe);
+    const run_cmd = b.addRunArtifact(main);
 
     // By making the run step depend on the install step, it will be run from the
     // installation directory rather than directly from within the cache directory.
@@ -64,28 +71,57 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // Creates a step for unit testing. This only builds the test executable
-    // but does not run it.
-    const lib_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/root.zig" },
-        .target = target,
-        .optimize = optimize,
+    try SetupModules(b, &.{
+        .{ .name = "pprint", .path = "src/pp.zig" },
+        .{ .name = "string", .path = "src/string.zig" },
+        .{ .name = "script", .path = "src/script/script.zig" },
     });
 
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+    main.addModule("string", b.modules.get("string").?);
+    main.addModule("script", b.modules.get("script").?);
+    cmd.addModule("string", b.modules.get("string").?);
 
-    const exe_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
+    try SetupTest(b, &.{
+        .{ .name = "main", .path = "src/main.zig" },
+        .{ .name = "root", .path = "src/root.zig" },
+        .{ .name = "cmd", .path = "src/cmd/test.zig", .dependencies = &.{"string"} },
+        .{ .name = "script", .path = ".test/script.zig", .dependencies = &.{ "string", "script" } },
     });
-
-    const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
-
-    // Similar to creating the run step earlier, this exposes a `test` step to
-    // the `zig build --help` menu, providing a way for the user to request
-    // running the unit tests.
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
-    test_step.dependOn(&run_exe_unit_tests.step);
 }
+
+fn SetupModules(b: *std.Build, mods: []const Module) !void {
+    for (mods) |mod| {
+        _ = b.addModule(mod.name, .{
+            .source_file = .{ .path = mod.path },
+        });
+    }
+}
+
+fn SetupTest(b: *std.Build, tests: []const Test) !void {
+    const test_step = b.step("test", "Run unit tests");
+
+    for (tests) |t| {
+        const buildTest = b.addTest(.{
+            .name = t.name,
+            .root_source_file = .{ .path = t.path },
+        });
+
+        const run_test = b.addRunArtifact(buildTest);
+        for (t.dependencies) |dep| {
+            _ = buildTest.addModule(dep, b.modules.get(dep).?);
+        }
+
+        test_step.dependOn(&run_test.step);
+    }
+}
+
+const Test = struct {
+    name: []const u8,
+    path: []const u8,
+    dependencies: []const []const u8 = &.{},
+};
+
+const Module = struct {
+    name: []const u8,
+    path: []const u8,
+};
