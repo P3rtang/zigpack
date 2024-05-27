@@ -85,7 +85,7 @@ pub fn build(b: *std.Build) !void {
         .{ .name = "main", .path = "src/main.zig" },
         .{ .name = "root", .path = "src/root.zig" },
         .{ .name = "cmd", .path = "src/cmd/test.zig", .dependencies = &.{"string"} },
-        .{ .name = "script", .path = ".test/script.zig", .dependencies = &.{ "string", "script" } },
+        .{ .name = "script", .path = "testing/script.zig", .dependencies = &.{ "string", "script" } },
     });
 }
 

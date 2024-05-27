@@ -8,7 +8,7 @@ pub const Script = struct {
     script: u16,
     dependencies: [][]const u8 = &.{},
     build_dependencies: [][]const u8 = &.{},
-    script_directory: []const u8 = "./.test",
+    script_directory: []const u8 = "./testing",
 
     pub fn fromJSON(alloc: std.mem.Allocator, json: []const u8) !std.json.Parsed(Script) {
         return try std.json.parseFromSlice(Script, alloc, json, .{});
