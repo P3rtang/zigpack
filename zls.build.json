@@ -1,0 +1,4 @@
+{
+    "module":"script::/home/p3rtang/Projects/p3desk/src/script/script.zig"
+    "module":"cmd::/home/p3rtang/Projects/p3desk/src/cmd/mod.zig"
+}

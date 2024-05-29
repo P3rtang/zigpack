@@ -11,29 +11,32 @@ pub const commandError = error{
 pub fn command(comptime T: type) type {
     return struct {
         const Self = @This();
-        var a = std.heap.GeneralPurposeAllocator(.{}){};
-
         const cmdConfig = struct {
             use: []const u8,
             short: []const u8 = "",
             serve: ?*T = null,
         };
 
-        alloc: std.mem.Allocator = a.allocator(),
-        commands: std.StringHashMap(Self) = std.StringHashMap(Self).init(a.allocator()),
+        commands: std.StringHashMap(Self),
 
-        args: std.ArrayList(Argument) = std.ArrayList(Argument).init(a.allocator()),
+        args: std.ArrayList(Argument),
         argIndex: usize = 0,
 
         // TODO: think of using a hashmap with both the short and long flag as key
-        flags: std.ArrayList(Flag) = std.ArrayList(Flag).init(a.allocator()),
+        flags: std.ArrayList(Flag),
 
         config: cmdConfig = .{ .use = "root" },
 
-        usageStr: str = str.init(a.allocator()),
+        arena: std.heap.ArenaAllocator,
 
         pub fn init(alloc: std.mem.Allocator) Self {
-            var cmd = Self{ .alloc = alloc };
+            const arena = std.heap.ArenaAllocator.init(alloc);
+            var cmd = Self{
+                .arena = arena,
+                .commands = std.StringHashMap(Self).init(alloc),
+                .args = std.ArrayList(Argument).init(alloc),
+                .flags = std.ArrayList(Flag).init(alloc),
+            };
 
             cmd.addFlag(.{ .use = "help", .short = "h", .comment = "Show this message" }) catch return cmd;
 
@@ -41,14 +44,18 @@ pub fn command(comptime T: type) type {
         }
 
         pub fn deinit(self: *Self) void {
+            var cmds = self.commands.valueIterator();
+            while (cmds.next()) |cmd| {
+                cmd.deinit();
+            }
             self.commands.deinit();
-            self.flags.deinit();
             self.args.deinit();
-            self.usageStr.deinit();
+            self.flags.deinit();
+            self.arena.deinit();
         }
 
         pub fn execute(self: *Self) !void {
-            var parser = try parse.Parser.new(self.alloc);
+            var parser = try parse.Parser.new(self.arena.allocator());
             defer parser.deinit();
 
             try self.executeWithParser(&parser);
@@ -140,13 +147,14 @@ pub fn command(comptime T: type) type {
         }
 
         pub fn addCommand(self: *Self, config: cmdConfig) !*command(T) {
-            var cmd = Self{ .alloc = self.alloc, .config = config };
+            var cmd = Self.init(self.arena.child_allocator);
+            cmd.config = config;
             try self.commands.put(config.use, cmd);
             return self.commands.getPtr(config.use).?;
         }
 
         pub fn addArgument(self: *Self, name: []const u8, comptime argType: ArgType) !void {
-            var arg = Argument{ .name = name, .value = argType };
+            const arg = Argument{ .name = name, .value = argType };
             try self.args.append(arg);
         }
 
@@ -190,49 +198,48 @@ pub fn command(comptime T: type) type {
             };
             const hasArg = switch (self.args.items.len) {
                 0 => "",
+                1 => try std.fmt.allocPrint(self.arena.allocator(), " <{s}>", .{self.args.items[0].name}),
                 else => " <argument>",
             };
 
-            return std.fmt.allocPrint(self.alloc, "{s}{s}{s}", .{ self.config.use, hasCmd, hasArg });
+            return std.fmt.allocPrint(self.arena.allocator(), "{s}{s}{s}", .{ self.config.use, hasCmd, hasArg });
         }
 
         pub fn usage(self: *Self) ![]const u8 {
-            try self.usageStr.clear();
-            self.usageStr.add(" \n");
+            var usageStr = str.init(self.arena.allocator());
+
+            usageStr.add(" \n");
             if (self.config.short.len > 0) {
-                try self.usageStr.addFmt("{s}\n\n", .{self.config.short});
+                try usageStr.addFmt("{s}\n\n", .{self.config.short});
             }
 
-            self.usageStr.add("Usage:\n");
+            usageStr.add("Usage:\n");
             const usageBuf = try self.usageLine();
-            try self.usageStr.addFmt("  {s}\n\n", .{usageBuf});
-            self.alloc.free(usageBuf);
+            try usageStr.addFmt("  {s}\n\n", .{usageBuf});
 
             if (self.commands.count() > 0) {
-                self.usageStr.add("Available Commands:\n");
+                usageStr.add("Available Commands:\n");
                 var cmdIter = self.commands.iterator();
                 while (cmdIter.next()) |entry| {
-                    try self.usageStr.addFmt("  {s}\n", .{entry.key_ptr.*});
+                    try usageStr.addFmt("  {s}\n", .{entry.key_ptr.*});
                 }
             }
 
             if (self.flags.items.len > 0) {
-                self.usageStr.add("\nFlags:\n");
+                usageStr.add("\nFlags:\n");
                 for (self.flags.items) |flag| {
                     if (flag.short) |short| {
-                        try self.usageStr.addFmt("  --{s} | -{s}", .{ flag.use, short });
+                        try usageStr.addFmt("  --{s} | -{s}", .{ flag.use, short });
                     } else {
-                        try self.usageStr.addFmt("  --{s}", .{flag.use});
+                        try usageStr.addFmt("  --{s}", .{flag.use});
                     }
 
-                    try self.usageStr.addFmt("\t{s}\n", .{flag.comment});
+                    try usageStr.addFmt("\t{s}\n", .{flag.comment});
                 }
             }
 
-            self.usageStr.add("\n");
-
-            self.usageStr = self.usageStr;
-            return self.usageStr.toSlice();
+            usageStr.add("\n");
+            return usageStr.toSlice();
         }
     };
 }

@@ -15,33 +15,21 @@ pub fn build(b: *std.Build) !void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const lib = b.addStaticLibrary(.{
-        .name = "p3desk",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
-        .root_source_file = .{ .path = "src/root.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // This declares intent for the library to be installed into the standard
-    // location when the user invokes the "install" step (the default step when
-    // running `zig build`).
-    b.installArtifact(lib);
-
     const main = b.addExecutable(.{
         .name = "p3desk",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = .{ .cwd_relative = "src/main.zig" },
         .target = target,
         .optimize = optimize,
     });
 
-    const cmd = b.addStaticLibrary(.{
-        .name = "cmd",
-        .root_source_file = .{ .path = "src/cmd/mod.zig" },
-        .target = target,
-        .optimize = optimize,
+    try SetupModules(b, &.{
+        .{ .name = "string", .path = b.path("src/string.zig") },
+        .{ .name = "script", .path = b.path("src/script/script.zig") },
+        .{ .name = "cmd", .path = b.path("src/cmd/mod.zig"), .dependencies = &.{"string"} },
     });
+
+    main.root_module.addImport("string", b.modules.get("string").?);
+    main.root_module.addImport("script", b.modules.get("script").?);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -71,57 +59,95 @@ pub fn build(b: *std.Build) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    try SetupModules(b, &.{
-        .{ .name = "pprint", .path = "src/pp.zig" },
-        .{ .name = "string", .path = "src/string.zig" },
-        .{ .name = "script", .path = "src/script/script.zig" },
+    const test_step = b.step("test", "Run unit tests");
+
+    // const cmd_test = b.addTest(.{ .name = "cmd", .root_source_file = b.path("src/cmd/test.zig") });
+    // cmd_test.root_module.addImport("string", string);
+    // test_step.dependOn(&cmd_test.step);
+
+    // _ = b.addRunArtifact(cmd_test);
+    //
+    SetupTests(b, test_step, &.{
+        .{ .name = "cmd", .path = b.path("src/cmd/test.zig"), .dependencies = &.{"string"} },
     });
 
-    main.addModule("string", b.modules.get("string").?);
-    main.addModule("script", b.modules.get("script").?);
-    cmd.addModule("string", b.modules.get("string").?);
-
-    try SetupTest(b, &.{
-        .{ .name = "main", .path = "src/main.zig" },
-        .{ .name = "root", .path = "src/root.zig" },
-        .{ .name = "cmd", .path = "src/cmd/test.zig", .dependencies = &.{"string"} },
-        .{ .name = "script", .path = "testing/script.zig", .dependencies = &.{ "string", "script" } },
+    try SetupTestDirs(b, test_step, &.{
+        .{ .path = "testing", .dependencies = &.{ "string", "script" } },
     });
 }
 
 fn SetupModules(b: *std.Build, mods: []const Module) !void {
-    for (mods) |mod| {
-        _ = b.addModule(mod.name, .{
-            .source_file = .{ .path = mod.path },
+    for (mods) |m| {
+        const mod = b.addModule(m.name, .{
+            .root_source_file = m.path,
         });
-    }
-}
-
-fn SetupTest(b: *std.Build, tests: []const Test) !void {
-    const test_step = b.step("test", "Run unit tests");
-
-    for (tests) |t| {
-        const buildTest = b.addTest(.{
-            .name = t.name,
-            .root_source_file = .{ .path = t.path },
-        });
-
-        const run_test = b.addRunArtifact(buildTest);
-        for (t.dependencies) |dep| {
-            _ = buildTest.addModule(dep, b.modules.get(dep).?);
+        for (m.dependencies) |dep| {
+            mod.addImport(dep, b.modules.get(dep).?);
         }
-
-        test_step.dependOn(&run_test.step);
     }
 }
 
-const Test = struct {
-    name: []const u8,
-    path: []const u8,
-    dependencies: []const []const u8 = &.{},
-};
+fn SetupTests(b: *std.Build, step: *std.Build.Step, list: []const Test) void {
+    for (list) |t| {
+        SetupTest(b, step, t);
+    }
+}
+
+fn SetupTest(b: *std.Build, step: *std.Build.Step, t: Test) void {
+    const c = b.addTest(.{
+        .name = t.name,
+        .root_source_file = t.path,
+        .test_runner = b.path("test_runner.zig"),
+    });
+    for (t.dependencies) |dep| {
+        c.root_module.addImport(dep, b.modules.get(dep).?);
+    }
+    const run = b.addRunArtifact(c);
+    run.has_side_effects = true;
+    step.dependOn(&run.step);
+}
+
+fn SetupTestDir(b: *std.Build, step: *std.Build.Step, test_dir: TestDir) !void {
+    const lazy_path = b.path(test_dir.path);
+    const dir_path = lazy_path.getPath(b);
+    const dir = try std.fs.openDirAbsolute(dir_path, .{ .iterate = true });
+    var iter = dir.iterate();
+    while (try iter.next()) |f| {
+        switch (f.kind) {
+            .file => {
+                if (!std.mem.eql(u8, std.fs.path.extension(f.name), ".zig")) {
+                    continue;
+                }
+                SetupTest(b, step, .{
+                    .name = f.name,
+                    .path = b.path(b.pathJoin(&.{ test_dir.path, f.name })),
+                    .dependencies = test_dir.dependencies,
+                });
+            },
+            else => {},
+        }
+    }
+}
+
+fn SetupTestDirs(b: *std.Build, step: *std.Build.Step, list: []const TestDir) !void {
+    for (list) |d| {
+        try SetupTestDir(b, step, d);
+    }
+}
 
 const Module = struct {
     name: []const u8,
+    path: std.Build.LazyPath,
+    dependencies: []const []const u8 = &.{},
+};
+
+const Test = struct {
+    name: []const u8,
+    path: std.Build.LazyPath,
+    dependencies: []const []const u8 = &.{},
+};
+
+const TestDir = struct {
     path: []const u8,
+    dependencies: []const []const u8 = &.{},
 };

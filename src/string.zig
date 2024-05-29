@@ -5,15 +5,17 @@ const strError = error{
 };
 
 pub const str = struct {
-    len: usize = 0,
-    content: []u8 = &.{},
+    cap: usize = 64,
+    content: []u8,
 
     alloc: std.mem.Allocator,
 
     pub fn initUnsafe() str {}
 
     pub fn init(alloc: std.mem.Allocator) str {
-        return str{ .alloc = alloc };
+        var content = alloc.alloc(u8, 64) catch |err| std.debug.panic("Out of Memory: {any}\n", .{err});
+        content.len = 0;
+        return str{ .alloc = alloc, .content = content };
     }
 
     pub fn fromSlice(alloc: std.mem.Allocator, content: []const u8) str {
@@ -26,39 +28,41 @@ pub const str = struct {
         self.alloc.free(self.content);
     }
 
-    pub fn len(self: *str) usize {
-        return self.content.len;
-    }
-
     pub fn isEmpty(self: *str) bool {
         return self.content.len == 0;
     }
 
-    pub fn add(self: *str, value: []const u8) void {
-        if (self.alloc.resize(self.content, self.len + value.len)) {
-            self.content.len += value.len;
-            @memcpy(self.content[self.len..], value);
-        } else {
-            var buf = self.alloc.alloc(u8, self.len + value.len) catch |err| std.debug.panic("Out of Memory: {any}\n", .{err});
-            @memcpy(buf[0..self.len], self.content);
-            @memcpy(buf[self.len..], value);
-            self.alloc.free(self.content);
-            self.content = buf;
+    pub fn grow(self: *str, size: usize) void {
+        while (self.cap < size) {
+            if (!self.alloc.resize(self.content, self.cap + self.cap / 2)) {
+                var new_buf = self.alloc.alloc(u8, self.cap + self.cap / 2) catch |err| std.debug.panic("Out of Memory: {any}\n", .{err});
+                @memcpy(new_buf[0..self.content.len], self.content);
+                self.alloc.free(self.content);
+                self.content.ptr = new_buf.ptr;
+                self.cap = new_buf.len;
+            }
         }
-        self.len += value.len;
+    }
+
+    pub fn add(self: *str, value: []const u8) void {
+        if (self.cap < self.content.len + value.len) {
+            self.grow(self.content.len + value.len);
+        }
+        const old_len = self.content.len;
+        self.content.len += value.len;
+        @memcpy(self.content[old_len..self.content.len], value);
     }
 
     pub fn addFmt(self: *str, comptime fmt: []const u8, args: anytype) !void {
-        var newBuf = try std.fmt.allocPrint(self.alloc, fmt, args);
+        const newBuf = try std.fmt.allocPrint(self.alloc, fmt, args);
 
         self.add(newBuf);
         self.alloc.free(newBuf);
     }
 
     pub fn toSlice(self: *str) []const u8 {
-        var content = self.content;
+        const content = self.content;
         self.content = self.alloc.alloc(u8, 0) catch |err| std.debug.panic("Out of Memory: {any}\n", .{err});
-        self.len = 0;
         return content;
     }
 
@@ -73,7 +77,6 @@ pub const str = struct {
         }
 
         self.content.len = 0;
-        self.len = 0;
     }
 
     pub fn format(self: str, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {

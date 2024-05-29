@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = @import("cmd/mod.zig");
-const script = @import("script/script.zig");
+const script = @import("script");
+const cmdContext = @import("context.zig");
 
 pub fn main() !void {
     // stdout is for the actual output of your application, for example if you
@@ -15,22 +16,11 @@ pub fn main() !void {
     var cmd = c.command(cmdContext).init(alloc.allocator());
     defer cmd.deinit();
 
-    _ = try cmd.addCommand(.{ .use = "install" });
+    var ctx = cmdContext{ .cb = cmdContext.install };
+    var install = try cmd.addCommand(.{ .use = "install", .serve = &ctx });
+    try install.addArgument("program", .{ .String = "" });
 
     try cmd.execute();
 
     try bw.flush();
 }
-
-const cmdContext = struct {
-    const Self = @This();
-    const Cmd = c.command(Self);
-
-    cb: ?*const fn (ctx: *Self, cmd: *Cmd) void = null,
-
-    pub fn call(self: *Self, cmd: *Cmd) void {
-        if (self.cb) |cb| {
-            cb(self, cmd);
-        }
-    }
-};

@@ -4,12 +4,12 @@ const c = @import("cmd.zig");
 const parse = @import("parse.zig");
 const pPrint = @import("pprint").pPrint;
 
-test "parser from args" {
+test "parser_from_args" {
     const parser = try parse.Parser.new(testing.allocator);
     defer parser.deinit();
 }
 
-test "cmd parse arguments" {
+test "cmd_parse_arguments" {
     const args1 = "test -a --full";
     var parser = try parse.Parser.fromStr(args1, ' ', testing.allocator);
     defer parser.deinit();
@@ -23,7 +23,7 @@ test "cmd parse arguments" {
     try std.testing.expect(parser.next() == null);
 }
 
-test "handle commands" {
+test "handle_commands" {
     const testValue = enum {
         Default,
         Test1,
@@ -96,7 +96,7 @@ test "handle commands" {
     try std.testing.expect(helloWorldContext.value == .Test3);
 }
 
-test "handle arguments" {
+test "handle_arguments" {
     const cmdContext = struct {
         const Self = @This();
         const Cmd = c.command(Self);
@@ -136,7 +136,7 @@ test "handle arguments" {
     try std.testing.expectError(c.commandError.MissingArgument, cmd.executeWithParser(&parser2));
 }
 
-test "handle flags" {
+test "handle_flags" {
     const cmdContext = struct {
         const Self = @This();
         const Cmd = c.command(Self);
@@ -177,7 +177,7 @@ test "handle flags" {
     try std.testing.expect(fooCtx.int == 420);
 }
 
-test "show command usage" {
+test "show_command_usage" {
     const cmdContext = struct {
         const Self = @This();
         const Cmd = c.command(Self);
@@ -191,8 +191,9 @@ test "show command usage" {
         }
     };
 
-    var cmd = c.command(cmdContext){ .alloc = testing.allocator, .config = .{ .use = "test", .short = "short cmd description" } };
-    try cmd.addFlag(.{ .use = "help", .short = "h", .comment = "Show this message" });
+    var cmd = c.command(cmdContext).init(std.testing.allocator);
+    cmd.config = .{ .use = "test", .short = "short cmd description" };
+
     defer cmd.deinit();
 
     var fileCtx = cmdContext{};

@@ -1,31 +1,64 @@
 const std = @import("std");
 const str = @import("string").str;
 
-pub const Script = struct {
+const ScriptData = struct {
     name: []const u8,
     description: []const u8 = "",
-    comment: []const u8 = "",
-    script: u16,
+    comment: ?[]const u8 = "",
+    script: u32,
     dependencies: [][]const u8 = &.{},
     build_dependencies: [][]const u8 = &.{},
-    script_directory: []const u8 = "./testing",
+};
 
-    pub fn fromJSON(alloc: std.mem.Allocator, json: []const u8) !std.json.Parsed(Script) {
-        return try std.json.parseFromSlice(Script, alloc, json, .{});
+pub const Script = struct {
+    data: ScriptData,
+    script_directory: []const u8 = "./scripts",
+    stdout: ?*std.io.AnyWriter = null,
+    stderr: ?*std.io.AnyWriter = null,
+    collect_options: CollectOptions = CollectOptions{},
+    arena: *std.heap.ArenaAllocator,
+
+    pub fn deinit(self: Script) void {
+        const allocator = self.arena.child_allocator;
+        self.arena.deinit();
+        allocator.destroy(self.arena);
     }
 
-    pub fn scriptContent(self: *Script, alloc: std.mem.Allocator) !ScriptIter {
-        var arena_alloc = std.heap.ArenaAllocator.init(alloc);
-        var arena = arena_alloc.allocator();
-        defer arena_alloc.deinit();
+    pub fn fromJSON(alloc: std.mem.Allocator, json: []const u8) !Script {
+        const parsed = try std.json.parseFromSlice(ScriptData, alloc, json, .{});
+        const script = Script{
+            .data = parsed.value,
+            .arena = parsed.arena,
+        };
+        return script;
+    }
+
+    pub fn fromJsonReader(alloc: std.mem.Allocator, reader: std.io.AnyReader) !Script {
+        const json = try reader.readAllAlloc(alloc, 16392);
+        const s = try Script.fromJSON(alloc, json);
+        alloc.free(json);
+        return s;
+    }
+
+    pub fn scriptDir(self: *Script, dir: []const u8) void {
+        self.script_directory = dir;
+    }
+
+    pub fn collectOutput(self: *Script, stdout: *std.io.AnyWriter, stderr: *std.io.AnyWriter, options: CollectOptions) !void {
+        self.stdout = stdout;
+        self.stderr = stderr;
+        self.collect_options = options;
+    }
+
+    pub fn scriptContent(self: *const Script) !ScriptIter {
+        const arena = self.arena.allocator();
 
         const dir_path = try std.fs.realpathAlloc(arena, self.script_directory);
-        std.log.warn("{s}", .{dir_path});
 
         var dir = try std.fs.openDirAbsolute(dir_path, .{});
         defer dir.close();
 
-        const file_name = try std.fmt.allocPrint(arena, "{}.sh", .{self.script});
+        const file_name = try std.fmt.allocPrint(arena, "{}.sh", .{self.data.script});
         var file = try dir.openFile(file_name, .{});
         defer file.close();
 
@@ -34,12 +67,31 @@ pub const Script = struct {
         var content = std.ArrayList(u8).init(arena);
         try reader.readAllArrayList(&content, try file.getEndPos());
 
-        const script_iter = ScriptIter.init(alloc, try content.toOwnedSlice());
+        const script_iter = ScriptIter.init(self.arena.allocator(), try content.toOwnedSlice());
         return script_iter;
     }
 
-    pub fn exec(self: *Script) !void {
-        _ = self;
+    pub fn exec(self: *const Script) !void {
+        var iter = try self.scriptContent();
+        var stdout = std.ArrayList(u8).init(self.arena.allocator());
+        var stderr = std.ArrayList(u8).init(self.arena.allocator());
+
+        var child: ?std.process.Child = try iter.next();
+        while (child != null) : (child = try iter.next()) {
+            child.?.stdout_behavior = .Pipe;
+            child.?.stderr_behavior = .Pipe;
+
+            try child.?.spawn();
+            try child.?.collectOutput(&stdout, &stderr, 4096);
+            _ = try child.?.wait();
+
+            if (self.stdout) |w| {
+                try w.writeAll(try stdout.toOwnedSlice());
+            }
+            if (self.stderr) |w| {
+                try w.writeAll(try stderr.toOwnedSlice());
+            }
+        }
     }
 };
 
@@ -191,4 +243,8 @@ const TokenKind = enum {
     NewLine,
     Space,
     DoubleQuote,
+};
+
+const CollectOptions = struct {
+    Verbose: bool = false,
 };
