@@ -1,4 +1,11 @@
 {
-    "name": "zig",
-    "script": 12341234
+    "zig": {
+        "name": "zig",
+        "description": "",
+        "comment": "",
+        "script": 12341234,
+        "dependencies": [],
+        "build_dependencies": [],
+        "env": { "HOME": "/home/p3rtang" }
+    }
 }

@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @import("cmd/mod.zig");
+const c = @import("cmd");
 const script = @import("script");
 const cmdContext = @import("context.zig");
 
@@ -16,9 +16,15 @@ pub fn main() !void {
     var cmd = c.command(cmdContext).init(alloc.allocator());
     defer cmd.deinit();
 
-    var ctx = cmdContext{ .cb = cmdContext.install };
-    var install = try cmd.addCommand(.{ .use = "install", .serve = &ctx });
-    try install.addArgument("program", .{ .String = "" });
+    {
+        var ctx = cmdContext{ .cb = cmdContext.install };
+        var install = try cmd.addCommand(.{ .use = "install", .serve = &ctx });
+        try install.addArgument("program", .{ .String = "" });
+    }
+    {
+        var ctx = cmdContext{ .cb = cmdContext.record };
+        _ = try cmd.addCommand(.{ .use = "record", .serve = &ctx });
+    }
 
     try cmd.execute();
 

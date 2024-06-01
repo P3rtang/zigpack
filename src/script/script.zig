@@ -1,13 +1,14 @@
 const std = @import("std");
 const str = @import("string").str;
 
-const ScriptData = struct {
+pub const ScriptData = struct {
     name: []const u8,
     description: []const u8 = "",
     comment: ?[]const u8 = "",
     script: u32,
     dependencies: [][]const u8 = &.{},
     build_dependencies: [][]const u8 = &.{},
+    env: ?std.json.ArrayHashMap([]const u8) = null,
 };
 
 pub const Script = struct {
@@ -16,21 +17,39 @@ pub const Script = struct {
     stdout: ?*std.io.AnyWriter = null,
     stderr: ?*std.io.AnyWriter = null,
     collect_options: CollectOptions = CollectOptions{},
-    arena: *std.heap.ArenaAllocator,
+    arena: std.heap.ArenaAllocator,
+    envMap: ?std.process.EnvMap = null,
 
-    pub fn deinit(self: Script) void {
-        const allocator = self.arena.child_allocator;
-        self.arena.deinit();
-        allocator.destroy(self.arena);
+    pub fn init(alloc: std.mem.Allocator, data: ScriptData) !Script {
+        var script = Script{
+            .data = data,
+            .arena = std.heap.ArenaAllocator.init(alloc),
+        };
+
+        if (script.data.env) |env| {
+            var env_map = std.process.EnvMap.init(script.arena.allocator());
+
+            var env_iter = env.map.iterator();
+            while (env_iter.next()) |i| {
+                try env_map.put(i.key_ptr.*, i.value_ptr.*);
+            }
+            script.envMap = env_map;
+        }
+
+        return script;
     }
 
-    pub fn fromJSON(alloc: std.mem.Allocator, json: []const u8) !Script {
+    pub fn deinit(self: Script) void {
+        self.arena.deinit();
+    }
+
+    pub fn fromJSON(alloc: std.mem.Allocator, json: []const u8) !std.json.Parsed(Script) {
         const parsed = try std.json.parseFromSlice(ScriptData, alloc, json, .{});
-        const script = Script{
-            .data = parsed.value,
+
+        return std.json.Parsed(Script){
             .arena = parsed.arena,
+            .value = try Script.init(parsed.arena.allocator(), parsed.value),
         };
-        return script;
     }
 
     pub fn fromJsonReader(alloc: std.mem.Allocator, reader: std.io.AnyReader) !Script {
@@ -50,9 +69,8 @@ pub const Script = struct {
         self.collect_options = options;
     }
 
-    pub fn scriptContent(self: *const Script) !ScriptIter {
+    pub fn scriptContent(self: *Script) !ScriptIter {
         const arena = self.arena.allocator();
-
         const dir_path = try std.fs.realpathAlloc(arena, self.script_directory);
 
         var dir = try std.fs.openDirAbsolute(dir_path, .{});
@@ -67,29 +85,34 @@ pub const Script = struct {
         var content = std.ArrayList(u8).init(arena);
         try reader.readAllArrayList(&content, try file.getEndPos());
 
-        const script_iter = ScriptIter.init(self.arena.allocator(), try content.toOwnedSlice());
+        const script_iter = try ScriptIter.init(self.arena.allocator(), try content.toOwnedSlice(), .{ .env = self.envMap });
         return script_iter;
     }
 
-    pub fn exec(self: *const Script) !void {
+    pub fn exec(self: *Script) !void {
         var iter = try self.scriptContent();
-        var stdout = std.ArrayList(u8).init(self.arena.allocator());
-        var stderr = std.ArrayList(u8).init(self.arena.allocator());
+
+        var stdout_buf = std.ArrayList(u8).init(self.arena.allocator());
+        var stderr_buf = std.ArrayList(u8).init(self.arena.allocator());
 
         var child: ?std.process.Child = try iter.next();
         while (child != null) : (child = try iter.next()) {
             child.?.stdout_behavior = .Pipe;
             child.?.stderr_behavior = .Pipe;
 
+            if (self.envMap) |env| {
+                child.?.env_map = &env;
+            }
+
             try child.?.spawn();
-            try child.?.collectOutput(&stdout, &stderr, 4096);
+            try child.?.collectOutput(&stdout_buf, &stderr_buf, 4096);
             _ = try child.?.wait();
 
             if (self.stdout) |w| {
-                try w.writeAll(try stdout.toOwnedSlice());
+                try w.writeAll(try stdout_buf.toOwnedSlice());
             }
             if (self.stderr) |w| {
-                try w.writeAll(try stderr.toOwnedSlice());
+                try w.writeAll(try stderr_buf.toOwnedSlice());
             }
         }
     }
@@ -99,12 +122,12 @@ pub const ScriptIter = struct {
     index: usize = 0,
     count: usize = 0,
     content: []ScriptToken,
+    envMap: ?std.process.EnvMap = null,
     alloc: std.heap.ArenaAllocator,
 
-    pub fn init(alloc: std.mem.Allocator, content: []const u8) !ScriptIter {
+    pub fn init(alloc: std.mem.Allocator, content: []const u8, options: struct { env: ?std.process.EnvMap = null }) !ScriptIter {
         var arena = std.heap.ArenaAllocator.init(alloc);
         var tokens = std.ArrayList(ScriptToken).init(arena.allocator());
-        defer tokens.deinit();
 
         var values = std.ArrayList(u8).init(arena.allocator());
         var kind: ?TokenKind = null;
@@ -143,6 +166,27 @@ pub const ScriptIter = struct {
                     i += 1;
                     try values.append(content[i]);
                     kind = .Word;
+                },
+
+                '$' => {
+                    var key = std.ArrayList(u8).init(arena.allocator());
+                    kind = .Word;
+                    i += 1;
+                    while (std.ascii.isAlphabetic(content[i])) : (i += 1) {
+                        try key.append(content[i]);
+                    }
+
+                    if (options.env) |env| {
+                        if (env.get(key.items)) |val| {
+                            try values.appendSlice(val);
+                        } else {
+                            std.log.warn("Unknown Environment variable {s}", .{key.items});
+                            return error.UnknownEnvVar;
+                        }
+                    } else {
+                        return error.NoEnvironment;
+                    }
+                    i -= 1;
                 },
 
                 else => |char| {
@@ -185,6 +229,10 @@ pub const ScriptIter = struct {
         };
     }
 
+    fn setEnv(self: *ScriptIter, map: std.process.EnvMap) void {
+        self.envMap = map;
+    }
+
     fn addToken(list: *std.ArrayList(ScriptToken), kind: TokenKind, value: []const u8) !void {
         switch (kind) {
             .Word => {
@@ -212,13 +260,16 @@ pub const ScriptIter = struct {
     pub fn next(self: *ScriptIter) !?std.process.Child {
         var args = std.ArrayList([]const u8).init(self.alloc.allocator());
 
-        loop: while (self.count < self.content.len) : (self.count += 1) {
+        while (self.count < self.content.len) : (self.count += 1) {
             switch (self.content[self.count]) {
                 .Word => |val| try args.append(val),
                 .Value => |val| try args.append(try std.fmt.allocPrint(self.alloc.allocator(), "{d}", .{val})),
                 .DoubleQuote => |val| try args.append(try std.fmt.allocPrint(self.alloc.allocator(), "{s}", .{val})),
                 .Space => {},
-                .NewLine => break :loop,
+                .NewLine => {
+                    self.count += 1;
+                    break;
+                },
             }
         }
         if (args.items.len > 0) {

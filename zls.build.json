@@ -1,4 +1,5 @@
 {
-    "module":"script::/home/p3rtang/Projects/p3desk/src/script/script.zig"
-    "module":"cmd::/home/p3rtang/Projects/p3desk/src/cmd/mod.zig"
+    "module":"script::/home/p3rtang/Projects/p3desk/src/script/script.zig",
+    "module":"cmd::/home/p3rtang/Projects/p3desk/cmd/lib.zig",
+    "module":"tui::/home/p3rtang/Projects/p3desk/tui/lib.zig"
 }

@@ -1,6 +1,6 @@
 const std = @import("std");
-const parse = @import("./mod.zig").parse;
-const str = @import("./mod.zig").string.str;
+const parse = @import("./lib.zig").parse;
+const str = @import("./lib.zig").string.str;
 
 pub const commandError = error{
     MissingArgument,

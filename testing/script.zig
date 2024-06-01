@@ -1,8 +1,6 @@
 const std = @import("std");
 const s = @import("script");
 
-const alloc = std.testing.allocator;
-
 test "parse_json" {
     const json =
         \\{
@@ -12,28 +10,30 @@ test "parse_json" {
         \\  "dependencies": [
         \\      "cmake",
         \\      "rustup"
-        \\  ]
+        \\  ],
+        \\  "env": {}
         \\}
     ;
 
     const script = try s.Script.fromJSON(std.testing.allocator, json);
     defer script.deinit();
 
-    try std.testing.expectEqualStrings("test", script.data.name);
+    try std.testing.expectEqualStrings("test", script.value.data.name);
 
     const deps: []const []const u8 = &.{ "cmake", "rustup" };
-    for (script.data.dependencies, 0..) |dep, i| {
+    for (script.value.data.dependencies, 0..) |dep, i| {
         try std.testing.expectEqualStrings(dep, deps[i]);
     }
 }
 
 test "script_iter" {
+    const alloc = std.testing.allocator;
     {
         const script =
             \\echo hello
         ;
 
-        var s_iter = try s.ScriptIter.init(alloc, script);
+        var s_iter = try s.ScriptIter.init(alloc, script, .{});
         defer s_iter.deinit();
         var child = (try s_iter.next()).?;
 
@@ -63,19 +63,19 @@ test "script_iter" {
 
         const expect: []const []const u8 = &.{ "hello,\n", "world!\n" };
 
-        var s_iter = try s.ScriptIter.init(alloc, script);
+        var s_iter = try s.ScriptIter.init(alloc, script, .{});
         defer s_iter.deinit();
 
         var i: usize = 0;
         var child: ?std.process.Child = try s_iter.next();
-        var stdout = std.ArrayList(u8).init(alloc);
-        var stderr = std.ArrayList(u8).init(alloc);
-        defer {
-            stdout.deinit();
-            stderr.deinit();
-        }
-
         while (child != null) : (i += 1) {
+            var stdout = std.ArrayList(u8).init(alloc);
+            var stderr = std.ArrayList(u8).init(alloc);
+            defer {
+                stdout.deinit();
+                stderr.deinit();
+            }
+
             child.?.stdout_behavior = .Pipe;
             child.?.stderr_behavior = .Pipe;
 
@@ -91,12 +91,13 @@ test "script_iter" {
 }
 
 test "quotes" {
+    const alloc = std.testing.allocator;
     {
         const script =
             \\echo "Hello, world!"
         ;
 
-        var s_iter = try s.ScriptIter.init(alloc, script);
+        var s_iter = try s.ScriptIter.init(alloc, script, .{});
         defer s_iter.deinit();
 
         const child: std.process.Child = (try s_iter.next()).?;
@@ -107,7 +108,7 @@ test "quotes" {
             \\echo "\"Hello, world!\""
         ;
 
-        var s_iter = try s.ScriptIter.init(alloc, script);
+        var s_iter = try s.ScriptIter.init(alloc, script, .{});
         defer s_iter.deinit();
 
         const child: std.process.Child = (try s_iter.next()).?;
@@ -116,6 +117,7 @@ test "quotes" {
 }
 
 test "read_script" {
+    const alloc = std.testing.allocator;
     const json =
         \\{
         \\  "name": "test",
@@ -124,22 +126,27 @@ test "read_script" {
         \\  "dependencies": [
         \\      "cmake",
         \\      "rustup"
-        \\  ]
+        \\  ],
+        \\  "env": {}
         \\}
     ;
 
     var script = try s.Script.fromJSON(alloc, json);
     defer script.deinit();
-    script.scriptDir("./testing");
 
-    var script_iter = try script.scriptContent();
+    script.value.scriptDir("./testing");
+
+    var script_iter = try script.value.scriptContent();
     defer script_iter.deinit();
 
     const child: std.process.Child = (try script_iter.next()).?;
     try std.testing.expectEqualStrings("Hello, world!", child.argv[1]);
+    const child2: std.process.Child = (try script_iter.next()).?;
+    try std.testing.expectEqualStrings("Hello, world!", child2.argv[1]);
 }
 
 test "execute_script" {
+    const alloc = std.testing.allocator;
     {
         const json =
             \\{
@@ -149,26 +156,27 @@ test "execute_script" {
             \\  "dependencies": [
             \\      "cmake",
             \\      "rustup"
-            \\  ]
+            \\  ],
+            \\  "env": {}
             \\}
         ;
 
         var script = try s.Script.fromJSON(alloc, json);
         defer script.deinit();
-        script.scriptDir("./testing");
+        script.value.scriptDir("./testing");
 
         var stdout = std.ArrayList(u8).init(alloc);
         var stderr = std.ArrayList(u8).init(alloc);
+        var stdout_w = stdout.writer().any();
+        var stderr_w = stdout.writer().any();
         defer {
             stdout.deinit();
             stderr.deinit();
         }
 
-        var stdout_w = stdout.writer().any();
-        var stderr_w = stderr.writer().any();
-        try script.collectOutput(&stdout_w, &stderr_w, .{});
-        try script.exec();
+        try script.value.collectOutput(&stdout_w, &stderr_w, .{});
+        try script.value.exec();
 
-        try std.testing.expectEqualStrings("Hello, world!\n", stdout.items);
+        try std.testing.expectEqualStrings("Hello, world!\nHello, world!\nHello, world!\n", stdout.items);
     }
 }

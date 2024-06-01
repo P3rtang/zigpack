@@ -4,15 +4,7 @@ const std = @import("std");
 // declaratively construct a build graph that will be executed by an external
 // runner.
 pub fn build(b: *std.Build) !void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
-
-    // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
-    // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
     const main = b.addExecutable(.{
@@ -22,66 +14,68 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    try SetupModules(b, &.{
-        .{ .name = "string", .path = b.path("src/string.zig") },
-        .{ .name = "script", .path = b.path("src/script/script.zig") },
-        .{ .name = "cmd", .path = b.path("src/cmd/mod.zig"), .dependencies = &.{"string"} },
+    main.linkLibC();
+    main.linkSystemLibrary("ncursesw");
+
+    const tui = b.addStaticLibrary(std.Build.StaticLibraryOptions{
+        .name = "tui",
+        .root_source_file = b.path("tui/lib.zig"),
+        .target = target,
+        .optimize = optimize,
     });
 
-    main.root_module.addImport("string", b.modules.get("string").?);
-    main.root_module.addImport("script", b.modules.get("script").?);
+    main.root_module.addImport("tui", &tui.root_module);
 
-    // This declares intent for the executable to be installed into the
-    // standard location when the user invokes the "install" step (the default
-    // step when running `zig build`).
+    try SetupModules(b, &main.root_module, &.{
+        .{ .name = "string", .path = b.path("src/string.zig") },
+        .{ .name = "script", .path = b.path("src/script/script.zig") },
+        .{ .name = "cmd", .path = b.path("cmd/lib.zig"), .module_deps = &.{"string"} },
+        .{ .name = "tui", .path = b.path("tui/lib.zig") },
+    });
+
     b.installArtifact(main);
 
-    // This *creates* a Run step in the build graph, to be executed when another
-    // step is evaluated that depends on it. The next line below will establish
-    // such a dependency.
-    const run_cmd = b.addRunArtifact(main);
+    main.addIncludePath(b.path("src/string.zig"));
+    main.addIncludePath(b.path("cmd/lib.zig"));
+    main.addIncludePath(b.path("tui/lib.zig"));
 
-    // By making the run step depend on the install step, it will be run from the
-    // installation directory rather than directly from within the cache directory.
-    // This is not necessary, however, if the application depends on other installed
-    // files, this ensures they will be present and in the expected location.
+    const run_cmd = b.addRunArtifact(main);
     run_cmd.step.dependOn(b.getInstallStep());
 
-    // This allows the user to pass arguments to the application in the build
-    // command itself, like this: `zig build run -- arg1 arg2 etc`
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }
 
-    // This creates a build step. It will be visible in the `zig build --help` menu,
-    // and can be selected like this: `zig build run`
-    // This will evaluate the `run` step rather than the default, which is "install".
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
     const test_step = b.step("test", "Run unit tests");
 
-    // const cmd_test = b.addTest(.{ .name = "cmd", .root_source_file = b.path("src/cmd/test.zig") });
-    // cmd_test.root_module.addImport("string", string);
-    // test_step.dependOn(&cmd_test.step);
-
-    // _ = b.addRunArtifact(cmd_test);
-    //
     SetupTests(b, test_step, &.{
-        .{ .name = "cmd", .path = b.path("src/cmd/test.zig"), .dependencies = &.{"string"} },
+        .{ .name = "cmd", .path = b.path("cmd/test.zig"), .config = .{ .module_deps = &.{"string"} } },
     });
 
     try SetupTestDirs(b, test_step, &.{
-        .{ .path = "testing", .dependencies = &.{ "string", "script" } },
+        .{ .path = "testing", .config = .{ .module_deps = &.{ "string", "script" }, .useLibC = true } },
     });
+
+    const tui_test = b.step("tui", "Run tui unit tests");
+    try SetupTestDirs(b, tui_test, &.{
+        .{ .path = "tui/testing", .config = .{ .module_deps = &.{"tui"}, .useLibC = true, .system_libs = &.{"ncursesw"} } },
+    });
+
+    test_step.dependOn(tui_test);
 }
 
-fn SetupModules(b: *std.Build, mods: []const Module) !void {
+fn SetupModules(b: *std.Build, parent_mod: *std.Build.Module, mods: []const Module) !void {
     for (mods) |m| {
         const mod = b.addModule(m.name, .{
             .root_source_file = m.path,
         });
-        for (m.dependencies) |dep| {
+
+        parent_mod.addImport(m.name, mod);
+
+        for (m.module_deps) |dep| {
             mod.addImport(dep, b.modules.get(dep).?);
         }
     }
@@ -99,7 +93,16 @@ fn SetupTest(b: *std.Build, step: *std.Build.Step, t: Test) void {
         .root_source_file = t.path,
         .test_runner = b.path("test_runner.zig"),
     });
-    for (t.dependencies) |dep| {
+
+    if (t.config.useLibC) {
+        c.linkLibC();
+    }
+
+    for (t.config.system_libs) |lib| {
+        c.linkSystemLibrary(lib);
+    }
+
+    for (t.config.module_deps) |dep| {
         c.root_module.addImport(dep, b.modules.get(dep).?);
     }
     const run = b.addRunArtifact(c);
@@ -121,7 +124,7 @@ fn SetupTestDir(b: *std.Build, step: *std.Build.Step, test_dir: TestDir) !void {
                 SetupTest(b, step, .{
                     .name = f.name,
                     .path = b.path(b.pathJoin(&.{ test_dir.path, f.name })),
-                    .dependencies = test_dir.dependencies,
+                    .config = test_dir.config,
                 });
             },
             else => {},
@@ -138,16 +141,22 @@ fn SetupTestDirs(b: *std.Build, step: *std.Build.Step, list: []const TestDir) !v
 const Module = struct {
     name: []const u8,
     path: std.Build.LazyPath,
-    dependencies: []const []const u8 = &.{},
+    module_deps: []const []const u8 = &.{},
 };
 
 const Test = struct {
     name: []const u8,
     path: std.Build.LazyPath,
-    dependencies: []const []const u8 = &.{},
+    config: TestConfig,
 };
 
 const TestDir = struct {
     path: []const u8,
-    dependencies: []const []const u8 = &.{},
+    config: TestConfig,
+};
+
+const TestConfig = struct {
+    module_deps: []const []const u8 = &.{},
+    system_libs: []const []const u8 = &.{},
+    useLibC: bool = false,
 };
