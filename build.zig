@@ -15,7 +15,6 @@ pub fn build(b: *std.Build) !void {
     });
 
     main.linkLibC();
-    main.linkSystemLibrary("ncursesw");
 
     const tui = b.addStaticLibrary(std.Build.StaticLibraryOptions{
         .name = "tui",
@@ -61,7 +60,7 @@ pub fn build(b: *std.Build) !void {
 
     const tui_test = b.step("tui", "Run tui unit tests");
     try SetupTestDirs(b, tui_test, &.{
-        .{ .path = "tui/testing", .config = .{ .module_deps = &.{"tui"}, .useLibC = true, .system_libs = &.{"ncursesw"} } },
+        .{ .path = "tui/testing", .config = .{ .module_deps = &.{"tui"}, .useLibC = true } },
     });
 
     test_step.dependOn(tui_test);

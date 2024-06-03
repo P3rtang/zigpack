@@ -1,15 +1,17 @@
 const std = @import("std");
 const Term = @import("term.zig").Term;
+const Window = @import("term.zig").Window;
 const c = @cImport({
     @cInclude("termios.h");
 });
+usingnamespace @import("term.zig");
 
 const Widget = struct {
-    quadFn: *const fn (*Widget) Quad,
-    setQuadFn: *const fn (*Widget, Quad) void,
+    quadFn: *const fn (*Widget) Quad = getQuad,
+    setQuadFn: *const fn (*Widget, Quad) void = setQuad,
 
     availablePosFn: *const fn (*Widget) Pos,
-    setPosFn: *const fn (*Widget, Pos) void,
+    setPosFn: *const fn (*Widget, Pos) void = setPos,
 
     getBorderFn: *const fn (*Widget) BorderStyle = getBorderDefault,
     setBorderFn: *const fn (*Widget, BorderStyle) void = undefined,
@@ -18,19 +20,20 @@ const Widget = struct {
     drawFn: *const fn (*Widget) anyerror!void,
 
     hasChildren: bool = false,
+    quad: Quad = Quad{},
     padding: Padding = .{},
-    term: *Term = undefined,
+    term: ?*Term = undefined,
 
     fn draw(self: *Widget) !void {
         try self.drawFn(self);
     }
 
-    fn quad(self: *Widget) Quad {
-        return self.quadFn(self);
+    fn getQuad(self: *Widget) Quad {
+        return self.quad;
     }
 
     fn setQuad(self: *Widget, q: Quad) void {
-        self.setQuadFn(self, q);
+        self.quad = q;
     }
 
     fn availablePos(self: *Widget) Pos {
@@ -38,7 +41,8 @@ const Widget = struct {
     }
 
     fn setPos(self: *Widget, pos: Pos) void {
-        self.setPosFn(self, pos);
+        self.quad.x = pos.x;
+        self.quad.y = pos.y;
     }
 
     fn addWidget(self: *Widget, child: *Widget) !void {
@@ -46,8 +50,8 @@ const Widget = struct {
     }
 
     fn addWidgetDefault(self: *Widget, child: *Widget) !void {
-        const this_quad = self.quad();
-        const child_quad = child.quad();
+        const this_quad = self.quad;
+        const child_quad = child.quad;
         self.setQuad(Quad{
             .x = this_quad.x,
             .y = this_quad.y,
@@ -79,23 +83,25 @@ const BorderStyle = enum {
     Rounded,
 
     fn draw(self: BorderStyle, widget: *Widget) !void {
-        const quad = widget.quad();
-        switch (self) {
-            .Rounded => {
-                try widget.term.drawHorzLine(.{ .x = quad.x, .y = quad.y }, quad.w);
-                try widget.term.drawHorzLine(.{ .x = quad.x, .y = quad.y + quad.h - 1 }, quad.w);
-                try widget.term.drawVertLine(.{ .x = quad.x, .y = quad.y }, quad.h);
-                try widget.term.drawVertLine(.{ .x = quad.x + quad.w - 1, .y = quad.y }, quad.h);
-                try widget.term.move(quad.x, quad.y);
-                try widget.term.writeAll("╭");
-                try widget.term.move(quad.x + quad.w - 1, quad.y);
-                try widget.term.writeAll("╮");
-                try widget.term.move(quad.x, quad.y + quad.h - 1);
-                try widget.term.writeAll("╰");
-                try widget.term.move(quad.x + quad.w - 1, quad.y + quad.h - 1);
-                try widget.term.writeAll("╯");
-            },
-            .None => {},
+        const quad = widget.getQuad();
+        if (widget.term) |term| {
+            switch (self) {
+                .Rounded => {
+                    try term.drawHorzLine(.{ .x = quad.x, .y = quad.y }, quad.w);
+                    try term.drawHorzLine(.{ .x = quad.x, .y = quad.y + quad.h - 1 }, quad.w);
+                    try term.drawVertLine(.{ .x = quad.x, .y = quad.y }, quad.h);
+                    try term.drawVertLine(.{ .x = quad.x + quad.w - 1, .y = quad.y }, quad.h);
+                    try term.move(quad.x, quad.y);
+                    try term.writeAll("╭");
+                    try term.move(quad.x + quad.w - 1, quad.y);
+                    try term.writeAll("╮");
+                    try term.move(quad.x, quad.y + quad.h - 1);
+                    try term.writeAll("╰");
+                    try term.move(quad.x + quad.w - 1, quad.y + quad.h - 1);
+                    try term.writeAll("╯");
+                },
+                .None => {},
+            }
         }
     }
 
@@ -134,7 +140,6 @@ pub const Padding = struct {
 pub const UI = struct {
     const Self = @This();
 
-    quad: Quad,
     background: ?u32,
     border: BorderStyle,
 
@@ -144,9 +149,6 @@ pub const UI = struct {
     widget: Widget = Widget{
         .hasChildren = true,
         .drawFn = draw,
-
-        .quadFn = quad,
-        .setQuadFn = setQuad,
 
         .availablePosFn = availablePos,
         .setPosFn = undefined,
@@ -166,7 +168,6 @@ pub const UI = struct {
         return UI{
             .background = @intCast(0xff00ff),
             .border = .None,
-            .quad = Quad{},
             .widgets = std.ArrayListUnmanaged(*Widget).initBuffer(&.{}),
             .arena = std.heap.ArenaAllocator.init(alloc),
             .term = term,
@@ -177,7 +178,6 @@ pub const UI = struct {
         return UI{
             .background = @intCast(0xff00ff),
             .border = .None,
-            .quad = Quad{},
             .widgets = std.ArrayListUnmanaged(*Widget).initBuffer(&.{}),
             .arena = std.heap.ArenaAllocator.init(alloc),
         };
@@ -186,16 +186,6 @@ pub const UI = struct {
     pub fn deinit(self: Self) void {
         if (self.term) |*t| t.deinit();
         self.arena.deinit();
-    }
-
-    fn quad(w: *Widget) Quad {
-        const self = w.cast(Self);
-        return self.quad;
-    }
-
-    fn setQuad(w: *Widget, q: Quad) void {
-        const self = w.cast(Self);
-        self.quad = q;
     }
 
     fn availablePos(w: *Widget) Pos {
@@ -266,7 +256,6 @@ pub const UI = struct {
 pub const Layout = struct {
     const Self = @This();
 
-    quad: Quad = .{},
     border: BorderStyle = .None,
 
     layoutDirection: Direction = .Vert,
@@ -274,9 +263,6 @@ pub const Layout = struct {
     widget: Widget = .{
         .hasChildren = true,
         .drawFn = draw,
-
-        .quadFn = quad,
-        .setQuadFn = setQuad,
 
         .availablePosFn = availablePos,
         .setPosFn = setPos,
@@ -291,26 +277,23 @@ pub const Layout = struct {
 
     fn draw(w: *Widget) !void {
         const self = w.cast(Self);
-        w.setQuad(self.border.extendQuad(self.quad));
+        w.setQuad(self.border.extendQuad(w.getQuad()));
+
+        if (w.term) |term| {
+            var win = try term.newWindow(w.getQuad());
+            win.
+        }
+
         try self.border.draw(w);
-    }
-
-    fn quad(w: *Widget) Quad {
-        const self: *Self = @fieldParentPtr("widget", w);
-        return self.quad;
-    }
-
-    fn setQuad(w: *Widget, q: Quad) void {
-        const self = w.cast(Self);
-        self.quad = q;
     }
 
     fn availablePos(w: *Widget) Pos {
         const self = w.cast(Self);
+        const quad = w.getQuad();
         var pos: Pos = blk: {
             switch (self.layoutDirection) {
-                .Horz => break :blk .{ .x = self.quad.x + self.quad.w, .y = self.quad.y },
-                .Vert => break :blk .{ .x = self.quad.x, .y = self.quad.y + self.quad.h },
+                .Horz => break :blk .{ .x = quad.x + quad.w, .y = quad.y },
+                .Vert => break :blk .{ .x = quad.x, .y = quad.y + quad.h },
             }
         };
 
@@ -364,21 +347,17 @@ pub const DebugLayout = struct {
 pub const TextBox = struct {
     const Self = @This();
 
-    text: []u8 = "",
-
-    quad: Quad,
+    text: []const u8 = "",
 
     widget: Widget = .{
         .drawFn = draw,
-
-        .quadFn = quad,
-        .setQuadFn = setQuad,
         .availablePosFn = availablePos,
-        .setPosFn = setPos,
     },
 
-    pub fn init(text: []u8, size: struct { w: u32, h: u32 }) Self {
-        return Self{ .text = text, .quad = Quad{ .w = size.w, .h = size.h } };
+    pub fn init(text: []const u8, size: struct { w: u32, h: u32 }) Self {
+        var this = Self{ .text = text };
+        this.widget.setQuad(Quad{ .w = size.w, .h = size.h });
+        return this;
     }
 
     fn draw(w: *Widget) !void {
@@ -392,30 +371,16 @@ pub const TextBox = struct {
 
         var idx: u32 = 0;
         while (lines.next()) |line| : (idx += 1) {
-            try self.widget.term.move(self.quad.x, self.quad.y + idx);
-            var split_r = std.mem.splitBackwardsScalar(u8, line, '\r');
-            try w.term.writeAll(split_r.next().?);
+            if (w.term) |term| {
+                try term.move(w.getQuad().x, w.getQuad().y + idx);
+                var split_r = std.mem.splitBackwardsScalar(u8, line, '\r');
+                try term.writeAll(split_r.next().?);
+            }
         }
-    }
-
-    fn quad(w: *Widget) Quad {
-        const self = w.cast(Self);
-        return self.quad;
-    }
-
-    fn setQuad(w: *Widget, q: Quad) void {
-        const self = w.cast(Self);
-        self.quad = q;
     }
 
     fn availablePos(_: *Widget) Pos {
         unreachable;
-    }
-
-    fn setPos(w: *Widget, pos: Pos) void {
-        const self = w.cast(Self);
-        self.quad.x = pos.x;
-        self.quad.y = pos.y;
     }
 };
 
@@ -442,20 +407,6 @@ pub const Button = struct {
     fn draw(w: *Widget) !void {
         const self = w.cast(Self);
         _ = self; // autofix
-
-        // const win = c.subwin(c.stdscr, self.quad.h, self.quad.w, self.quad.y, self.quad.x);
-        // _ = c.init_pair(2, c.COLOR_BLACK, c.COLOR_WHITE);
-        // _ = c.wattrset(win, c.COLOR_PAIR(2));
-        // _ = c.wbkgd(win, @intCast(c.COLOR_PAIR(2)));
-
-        // // apply padding
-        // _ = c.wmove(win, w.padding.top, w.padding.left);
-
-        // const text_len: i32 = @intCast(self.text.len);
-        // _ = c.mvwaddstr(win, 0, @divExact(self.quad.w - text_len, 2), self.text.ptr);
-
-        // _ = c.wattroff(win, c.COLOR_PAIR(2));
-        // _ = c.wrefresh(win);
     }
 
     fn quad(w: *Widget) Quad {
@@ -486,5 +437,16 @@ pub const Button = struct {
             .w = self.quad.w + padding.left + padding.right,
             .h = self.quad.h + padding.top + padding.bottom,
         });
+    }
+};
+
+pub const List = struct {
+    const Self = @This();
+    widget: Widget = Widget{
+        .drawFn = draw,
+    },
+
+    fn draw(w: *Widget) !void {
+        _ = w; // autofix
     }
 };

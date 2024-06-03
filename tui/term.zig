@@ -1,6 +1,7 @@
 const std = @import("std");
 const lib = @import("lib.zig");
 const Pos = lib.Pos;
+const Quad = lib.Quad;
 const c = @cImport({
     @cInclude("stdio.h");
     @cInclude("fcntl.h");
@@ -14,7 +15,9 @@ pub const Term = struct {
     tty: std.fs.File,
     termios: std.os.linux.termios,
 
-    buffer: std.ArrayList(u8),
+    buffer: Window,
+    cursor: Pos,
+    sub_windows: std.ArrayList(*Window),
 
     arena: std.heap.ArenaAllocator,
 
@@ -25,21 +28,27 @@ pub const Term = struct {
 
         const buffer = std.ArrayList(u8).init(alloc);
 
+        try stdout_w.writeAll("\x1b[?25l");
+
         return Term{
             .tty = tty,
             .termios = termios,
 
             .buffer = buffer,
+            .cursor = Pos{},
+            .sub_windows = std.ArrayList(*Window).init(alloc),
 
             .arena = std.heap.ArenaAllocator.init(alloc),
         };
     }
 
     pub fn deinit(self: *const Term) void {
+        stdout_w.writeAll("\x1b[?25h") catch {};
         _ = c.fcntl(self.tty.handle, c.F_SETFL, c.fcntl(self.tty.handle, c.F_GETFL) & ~c.O_NONBLOCK);
         try self.intoCanon();
         self.tty.close();
         self.buffer.deinit();
+        self.sub_windows.deinit();
         self.arena.deinit();
     }
 
@@ -161,17 +170,88 @@ pub const Term = struct {
         }
     }
 
-    pub fn print(self: *Self, comptime fmt: []const u8, args: anytype) !void {
-        errdefer self.deinit();
-        try self.buffer.writer().print(fmt, args);
-    }
-
-    pub fn writeAll(self: *Self, bytes: []const u8) !void {
-        errdefer self.deinit();
-        try self.buffer.writer().writeAll(bytes);
-    }
-
     pub fn flush(self: *Self) !void {
+        errdefer self.deinit();
         try stdout_w.writeAll(try self.buffer.toOwnedSlice());
     }
+
+    pub fn newWindow(self: *Self, quad: Quad) !*Window {
+        const win = Window.init(self.arena.allocator(), quad);
+        self.sub_windows.append(&win);
+        return &win;
+    }
+};
+
+pub const Window = struct {
+    const Self = @This();
+
+    quad: Quad,
+    buffer: std.ArrayList(Char),
+    alloc: std.mem.Allocator,
+
+    cursor: Pos,
+    wrap: WrapBehaviour = .Wrap,
+
+    pub fn init(alloc: std.mem.Allocator, quad: Quad) !Window {
+        return Window{
+            .quad = quad,
+            .buffer = std.ArrayList(u8).init(alloc),
+            .alloc = alloc,
+        };
+    }
+
+    fn writeWindow(self: *Self, win: *Window) !void {
+        for (try win.buffer.toOwnedSlice(), 0..) |char, idx| {
+            const x = idx % win.quad.w + win.quad.x;
+            const y = @divFloor(idx, win.quad.w) + win.quad.y;
+            if (self.quad.w > x or self.quad.h < y) continue;
+            self.buffer.items[y*self.quad.w+x] = char;
+        }
+    }
+
+    fn writeCharAt(self: *Self, pos: Pos, char: Char) !void {
+        self.buffer.items[pos.y*self.quad.w+pos.x] = char;
+    }
+
+    fn writeChar(self: *Self, char: Char) void {
+        self.buffer.items[self.cursor.y*self.quad.w+self.cursor.x] = char;
+        self.advanceCursor();
+    }
+
+    fn advanceCursor(self: *Self) void {
+        self.cursor.x += 1;
+        self.cursor.x %= self.quad.w;
+        if (self.cursor.x == 0) {
+            self.cursor.y += 1;
+            self.cursor.y %= self.quad.h;
+        }
+    }
+
+    pub fn writeAll(self: *Self, bytes: []const u8) void {
+        for (bytes) |char| {
+            self.writeChar(char);
+        }
+    }
+
+    pub fn print(self: *Self, comptime fmt: []const u8, args: anytype) !void {
+        const bytes = try std.fmt.allocPrint(self.alloc, fmt, args);
+        self.writeAll(bytes);
+    }
+};
+
+pub const Char = struct {
+    char: u8,
+    fg: Color,
+    bg: Color,
+};
+
+pub const Color = struct {
+    red: u8,
+    green: u8,
+    blue: u8,
+};
+
+pub const WrapBehaviour = enum {
+    Wrap,
+    Nowrap,
 };
