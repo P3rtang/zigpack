@@ -1,6 +1,9 @@
 const std = @import("std");
 const tui = @import("tui");
-const c = @cImport(@cInclude("termios.h"));
+const c = @cImport({
+    @cInclude("termios.h");
+    @cInclude("stdio.h");
+});
 
 pub const InstallWindow = struct {
     const Self = @This();
@@ -11,9 +14,9 @@ pub const InstallWindow = struct {
     is_running: bool = false,
     update_delay: u32 = 30,
 
-    pub fn init(alloc: std.mem.Allocator, stdoutBuf: *std.ArrayList(u8)) InstallWindow {
+    pub fn init(alloc: std.mem.Allocator, stdoutBuf: *std.ArrayList(u8)) !InstallWindow {
         return Self{
-            .ui = tui.UI.init(alloc),
+            .ui = try tui.UI.init(alloc),
             .stdout_buf = stdoutBuf,
         };
     }
@@ -39,9 +42,13 @@ pub const InstallWindow = struct {
         self.is_running = true;
         while (self.is_running) {
             try self.update();
+            std.time.sleep(self.update_delay * std.time.ns_per_ms);
 
-            if (try std.io.getStdIn().reader().readByte() != 0) {
-                self.deinit();
+            if (try self.ui.term.?.pollChar()) |char| {
+                switch (char) {
+                    'q' => self.deinit(),
+                    else => {},
+                }
             }
         }
     }

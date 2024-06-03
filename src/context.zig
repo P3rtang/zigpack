@@ -15,6 +15,7 @@ var stdout = std.io.getStdOut().writer().any();
 var stderr = std.io.getStdErr().writer().any();
 
 cb: ?*const fn (ctx: *Self, cmd: *Cmd) void = null,
+tryCb: ?*const fn (ctx: *Self, cmd: *Cmd) anyerror!void = null,
 
 pub fn call(self: *Self, cmd: *Cmd) void {
     if (self.cb) |cb| {
@@ -22,11 +23,13 @@ pub fn call(self: *Self, cmd: *Cmd) void {
     }
 }
 
-pub fn install(self: *Self, cmd: *Cmd) void {
-    self.try_install(cmd) catch |err| std.debug.panicExtra(@errorReturnTrace(), null, "{any}\n", .{err});
+pub fn tryCall(self: *Self, cmd: *Cmd) !void {
+    if (self.tryCb) |cb| {
+        try cb(self, cmd);
+    }
 }
 
-fn try_install(_: *Self, cmd: *Cmd) !void {
+pub fn install(_: *Self, cmd: *Cmd) !void {
     var alloc = std.heap.GeneralPurposeAllocator(.{}){};
     var arena = std.heap.ArenaAllocator.init(alloc.allocator());
     defer arena.deinit();
@@ -65,7 +68,7 @@ fn try_install(_: *Self, cmd: *Cmd) !void {
         std.log.warn("No such program: `{s}`", .{program});
     }
 
-    var install_win = InstallWin.init(arena.allocator(), &stdout_buf);
+    var install_win = try InstallWin.init(arena.allocator(), &stdout_buf);
     try install_win.run();
     // wait on scripts to finish
     if (thread) |t| t.join();
@@ -93,7 +96,8 @@ fn try_record() !void {
         stderrBuf.writer().any(),
     });
 
-    var ui = tui.UI.init(gpa.allocator());
+    var ui = try tui.UI.init(gpa.allocator());
+
     defer ui.deinit();
 
     while (true) {
@@ -103,7 +107,7 @@ fn try_record() !void {
         {
             mutex.lock();
             defer mutex.unlock();
-            var textBox = tui.TextBox.init(stdoutBuf.items, .{ .w = 80, .h = 20 });
+            var textBox = tui.TextBox.init(try stdoutBuf.toOwnedSlice(), .{ .w = 80, .h = 20 });
             try ui.beginWidget(&textBox.widget);
             try ui.endWidget();
         }
@@ -143,4 +147,16 @@ fn loop(mutex: *std.Thread.Mutex, stdout_w: std.io.AnyWriter, stderr_w: std.io.A
         try stdout_w.writeAll(out.items);
         try stderr_w.writeAll(err.items);
     }
+}
+
+pub fn testing(_: *Self, _: *Cmd) !void {
+    var alloc = std.heap.GeneralPurposeAllocator(.{}){};
+
+    var ui = try tui.UI.init(alloc.allocator());
+    defer ui.deinit();
+
+    const pos = try ui.term.?.getCursorPos();
+    try stdout.print("{any}", .{pos});
+
+    std.time.sleep(4 * std.time.ns_per_s);
 }

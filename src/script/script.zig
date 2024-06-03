@@ -1,5 +1,13 @@
 const std = @import("std");
 const str = @import("string").str;
+const c = @cImport({
+    @cInclude("stdio.h");
+    @cInclude("fcntl.h");
+    @cInclude("pty.h");
+    @cInclude("unistd.h");
+    @cInclude("sys/wait.h");
+    @cInclude("sys/types.h");
+});
 
 pub const ScriptData = struct {
     name: []const u8,
@@ -90,31 +98,55 @@ pub const Script = struct {
     }
 
     pub fn exec(self: *Script) !void {
-        var iter = try self.scriptContent();
+        var script_iter = try self.scriptContent();
+        while (try script_iter.next()) |*child| {
+            const pipes = try std.posix.pipe2(.{ .NONBLOCK = true });
+            const pid = std.os.linux.fork();
 
-        var stdout_buf = std.ArrayList(u8).init(self.arena.allocator());
-        var stderr_buf = std.ArrayList(u8).init(self.arena.allocator());
+            if (pid == 0) {
+                std.posix.close(pipes[0]);
+                try std.posix.dup2(pipes[1], std.posix.STDERR_FILENO);
+                try std.posix.dup2(pipes[1], std.posix.STDOUT_FILENO);
 
-        var child: ?std.process.Child = try iter.next();
-        while (child != null) : (child = try iter.next()) {
-            child.?.stdout_behavior = .Pipe;
-            child.?.stderr_behavior = .Pipe;
+                var t = std.ArrayList(?[*:0]const u8).init(self.arena.allocator());
 
-            if (self.envMap) |env| {
-                child.?.env_map = &env;
-            }
+                for (child.argv[0..]) |arg| {
+                    var null_arg: [:0]u8 = try self.arena.allocator().allocSentinel(u8, arg.len, 0);
+                    @memcpy(null_arg[0..arg.len], arg);
+                    try t.append(null_arg);
+                }
 
-            try child.?.spawn();
-            try child.?.collectOutput(&stdout_buf, &stderr_buf, 4096);
-            _ = try child.?.wait();
-
-            if (self.stdout) |w| {
-                try w.writeAll(try stdout_buf.toOwnedSlice());
-            }
-            if (self.stderr) |w| {
-                try w.writeAll(try stderr_buf.toOwnedSlice());
+                const args: [*:null]?[*:0]const u8 = try t.toOwnedSliceSentinel(null);
+                const result = std.posix.execvpeZ(args[0].?, args, &.{null});
+                std.debug.panic("Child ERROR: {}", .{result});
+            } else {
+                try self.readPipe(pid, pipes);
             }
         }
+    }
+
+    fn readPipe(self: *Script, pid: usize, pipes: [2]i32) !void {
+        std.posix.close(pipes[1]);
+        while (true) {
+            std.time.sleep(5 * std.time.ns_per_ms);
+            var buf: [16000]u8 = undefined;
+
+            const size = std.posix.read(pipes[0], &buf) catch |err| switch (err) {
+                error.WouldBlock => continue,
+                else => return err,
+            };
+
+            if (size == 0) {
+                break;
+            }
+
+            // try std.io.getStdOut().writeAll(&buf);
+
+            try self.stderr.?.writeAll(&buf);
+        }
+
+        const result = std.posix.waitpid(@intCast(pid), 0);
+        if (result.status != 0) std.debug.panic("Parent ERROR: {}", .{result});
     }
 };
 

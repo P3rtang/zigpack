@@ -76,6 +76,7 @@ pub fn command(comptime T: type) type {
                             if (self.config.serve) |cb| {
                                 var cback = cb;
                                 cback.call(self);
+                                cback.tryCall(self) catch |err| std.debug.panicExtra(@errorReturnTrace(), null, "{any}", .{err});
                             }
                             try cmd.executeWithParser(parser);
                         } else if (self.args.items.len > self.argIndex) {
@@ -142,6 +143,7 @@ pub fn command(comptime T: type) type {
                 if (self.config.serve) |cb| {
                     var cback = cb;
                     cback.call(self);
+                    cback.tryCall(self) catch |err| std.debug.panicExtra(@errorReturnTrace(), null, "{any}", .{err});
                 }
             }
         }

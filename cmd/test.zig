@@ -45,6 +45,8 @@ test "handle_commands" {
             }
         }
 
+        pub fn tryCall(_: *Self, _: *Cmd) !void {}
+
         fn hello(ctx: *Self, cmd: *Cmd) void {
             _ = cmd;
             ctx.value = .Test1;
@@ -110,6 +112,8 @@ test "handle_arguments" {
             }
         }
 
+        pub fn tryCall(_: *Self, _: *Cmd) !void {}
+
         fn testArg(self: *Self, cmd: *Cmd) void {
             if (cmd.getArgument("file")) |arg| {
                 self.file = arg.String;
@@ -150,6 +154,8 @@ test "handle_flags" {
             }
         }
 
+        pub fn tryCall(_: *Self, _: *Cmd) !void {}
+
         fn testFlag(self: *Self, cmd: *Cmd) void {
             if (cmd.getFlag("flag")) |flag| {
                 self.int = @as(i64, flag.Integer);
@@ -189,6 +195,8 @@ test "show_command_usage" {
                 cb(self, cmd);
             }
         }
+
+        pub fn tryCall(_: *Self, _: *Cmd) !void {}
     };
 
     var cmd = c.command(cmdContext).init(std.testing.allocator);

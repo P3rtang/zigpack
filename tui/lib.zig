@@ -1,4 +1,5 @@
 const std = @import("std");
+const Term = @import("term.zig").Term;
 const c = @cImport({
     @cInclude("termios.h");
 });
@@ -18,6 +19,7 @@ const Widget = struct {
 
     hasChildren: bool = false,
     padding: Padding = .{},
+    term: *Term = undefined,
 
     fn draw(self: *Widget) !void {
         try self.drawFn(self);
@@ -76,17 +78,22 @@ const BorderStyle = enum {
     None,
     Rounded,
 
-    fn draw(self: BorderStyle, widget: *Widget, win: [*c]c.WINDOW) void {
+    fn draw(self: BorderStyle, widget: *Widget) !void {
         const quad = widget.quad();
         switch (self) {
             .Rounded => {
-                _ = c.wborder(win, 0, 0, 0, 0, 0, 0, 0, 0);
-                _ = c.mvwaddstr(win, 0, 0, "╭");
-                _ = c.mvwaddstr(win, quad.h - 1, 0, "╰");
-                _ = c.mvwaddstr(win, 0, quad.w - 1, "╮");
-                _ = c.mvwaddstr(win, quad.h - 1, quad.w - 1, "╯");
-
-                _ = c.wmove(win, 1, 1);
+                try widget.term.drawHorzLine(.{ .x = quad.x, .y = quad.y }, quad.w);
+                try widget.term.drawHorzLine(.{ .x = quad.x, .y = quad.y + quad.h - 1 }, quad.w);
+                try widget.term.drawVertLine(.{ .x = quad.x, .y = quad.y }, quad.h);
+                try widget.term.drawVertLine(.{ .x = quad.x + quad.w - 1, .y = quad.y }, quad.h);
+                try widget.term.move(quad.x, quad.y);
+                try widget.term.writeAll("╭");
+                try widget.term.move(quad.x + quad.w - 1, quad.y);
+                try widget.term.writeAll("╮");
+                try widget.term.move(quad.x, quad.y + quad.h - 1);
+                try widget.term.writeAll("╰");
+                try widget.term.move(quad.x + quad.w - 1, quad.y + quad.h - 1);
+                try widget.term.writeAll("╯");
             },
             .None => {},
         }
@@ -106,22 +113,22 @@ const Direction = enum {
 };
 
 pub const Quad = struct {
-    x: i32 = 0,
-    y: i32 = 0,
-    w: i32 = 0,
-    h: i32 = 0,
+    x: u32 = 0,
+    y: u32 = 0,
+    w: u32 = 0,
+    h: u32 = 0,
 };
 
 pub const Pos = struct {
-    x: i32 = 0,
-    y: i32 = 0,
+    x: u32 = 0,
+    y: u32 = 0,
 };
 
 pub const Padding = struct {
-    left: i32 = 0,
-    top: i32 = 0,
-    right: i32 = 0,
-    bottom: i32 = 0,
+    left: u32 = 0,
+    top: u32 = 0,
+    right: u32 = 0,
+    bottom: u32 = 0,
 };
 
 pub const UI = struct {
@@ -132,6 +139,7 @@ pub const UI = struct {
     border: BorderStyle,
 
     cursor: ?Pos = null,
+    term: ?Term = null,
 
     widget: Widget = Widget{
         .hasChildren = true,
@@ -150,9 +158,19 @@ pub const UI = struct {
 
     arena: std.heap.ArenaAllocator,
 
-    pub fn init(alloc: std.mem.Allocator) Self {
-        std.io.getStdOut().writer().print("\x1b[?1000h", .{}) catch {};
-        return initStub(alloc);
+    pub fn init(alloc: std.mem.Allocator) !Self {
+        var term = try Term.init(alloc);
+        try term.intoRaw();
+        try term.clearTerm();
+        try term.move(1, 1);
+        return UI{
+            .background = @intCast(0xff00ff),
+            .border = .None,
+            .quad = Quad{},
+            .widgets = std.ArrayListUnmanaged(*Widget).initBuffer(&.{}),
+            .arena = std.heap.ArenaAllocator.init(alloc),
+            .term = term,
+        };
     }
 
     pub fn initStub(alloc: std.mem.Allocator) Self {
@@ -165,7 +183,8 @@ pub const UI = struct {
         };
     }
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
+        if (self.term) |*t| t.deinit();
         self.arena.deinit();
     }
 
@@ -203,7 +222,9 @@ pub const UI = struct {
 
     pub fn draw(w: *Widget) !void {
         const self = w.cast(Self);
-        _ = self; // autofix
+        if (self.term) |*term| {
+            try term.flush();
+        }
     }
 
     pub fn beginWidget(self: *Self, widget: *Widget) !void {
@@ -213,14 +234,14 @@ pub const UI = struct {
                     return error.CannotHaveChild;
                 }
 
-                const pos = last.availablePos();
-                break :blk pos;
+                break :blk last.availablePos();
             } else {
                 break :blk Pos{ .x = 0, .y = 0 };
             }
         };
 
         widget.setPos(pos);
+        if (self.term) |*t| widget.term = t;
         try self.widgets.append(self.arena.allocator(), widget);
     }
 
@@ -271,9 +292,7 @@ pub const Layout = struct {
     fn draw(w: *Widget) !void {
         const self = w.cast(Self);
         w.setQuad(self.border.extendQuad(self.quad));
-        // const win = c.subwin(c.stdscr, self.quad.h, self.quad.w, self.quad.y, self.quad.x);
-        // self.border.draw(w, win);
-        // _ = c.wrefresh(win);
+        try self.border.draw(w);
     }
 
     fn quad(w: *Widget) Quad {
@@ -291,7 +310,7 @@ pub const Layout = struct {
         var pos: Pos = blk: {
             switch (self.layoutDirection) {
                 .Horz => break :blk .{ .x = self.quad.x + self.quad.w, .y = self.quad.y },
-                .Vert => break :blk .{ .x = 0, .y = self.quad.y + self.quad.h },
+                .Vert => break :blk .{ .x = self.quad.x, .y = self.quad.y + self.quad.h },
             }
         };
 
@@ -337,22 +356,15 @@ pub const DebugLayout = struct {
         const layout = w.cast(Layout);
         try Layout.draw(w);
 
-        const win = c.subwin(c.stdscr, layout.quad.h, layout.quad.w, layout.quad.y, layout.quad.x);
-
-        _ = c.init_pair(3, c.COLOR_RED, c.COLOR_BLACK);
-        _ = c.wbkgd(win, @intCast(c.COLOR_PAIR(3)));
-
-        _ = c.mvwaddstr(win, 0, 1, (try std.fmt.allocPrint(std.heap.page_allocator, "x={}, ", .{layout.quad.x})).ptr);
-        _ = c.waddstr(win, (try std.fmt.allocPrint(std.heap.page_allocator, "y={}, ", .{layout.quad.y})).ptr);
-        _ = c.waddstr(win, (try std.fmt.allocPrint(std.heap.page_allocator, "w={}, ", .{layout.quad.w})).ptr);
-        _ = c.waddstr(win, (try std.fmt.allocPrint(std.heap.page_allocator, "h={}", .{layout.quad.h})).ptr);
+        try w.term.move(layout.quad.x + 1, layout.quad.y);
+        try w.term.print("x={}, y={}, w={}, h={}", .{ layout.quad.x, layout.quad.y, layout.quad.w, layout.quad.h });
     }
 };
 
 pub const TextBox = struct {
     const Self = @This();
 
-    text: []const u8 = "",
+    text: []u8 = "",
 
     quad: Quad,
 
@@ -365,24 +377,24 @@ pub const TextBox = struct {
         .setPosFn = setPos,
     },
 
-    pub fn init(text: []const u8, size: struct { w: i32, h: i32 }) Self {
+    pub fn init(text: []u8, size: struct { w: u32, h: u32 }) Self {
         return Self{ .text = text, .quad = Quad{ .w = size.w, .h = size.h } };
     }
 
     fn draw(w: *Widget) !void {
         const self = w.cast(Self);
 
-        var term = c.struct_termios{};
-        c.cfmakeraw(&term);
+        if (std.mem.eql(u8, self.text, "")) {
+            return;
+        }
 
-        var contentSplit = std.mem.splitScalar(u8, self.text, '\n');
-        var idx: i32 = 0;
-        while (contentSplit.next()) |t| : (idx += 1) {
-            var alloc = std.heap.page_allocator;
-            const line = try alloc.allocSentinel(u8, t.len, 0);
-            @memcpy(line, t);
-            // _ = c.mvwaddstr(win, self.quad.y + idx, self.quad.x, line);
-            alloc.free(line);
+        var lines = std.mem.splitScalar(u8, self.text, '\n');
+
+        var idx: u32 = 0;
+        while (lines.next()) |line| : (idx += 1) {
+            try self.widget.term.move(self.quad.x, self.quad.y + idx);
+            var split_r = std.mem.splitBackwardsScalar(u8, line, '\r');
+            try w.term.writeAll(split_r.next().?);
         }
     }
 

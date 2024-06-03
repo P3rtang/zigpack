@@ -17,13 +17,17 @@ pub fn main() !void {
     defer cmd.deinit();
 
     {
-        var ctx = cmdContext{ .cb = cmdContext.install };
+        var ctx = cmdContext{ .tryCb = cmdContext.install };
         var install = try cmd.addCommand(.{ .use = "install", .serve = &ctx });
         try install.addArgument("program", .{ .String = "" });
     }
     {
         var ctx = cmdContext{ .cb = cmdContext.record };
         _ = try cmd.addCommand(.{ .use = "record", .serve = &ctx });
+    }
+    {
+        var ctx = cmdContext{ .tryCb = cmdContext.testing };
+        _ = try cmd.addCommand(.{ .use = "test", .serve = &ctx });
     }
 
     try cmd.execute();
