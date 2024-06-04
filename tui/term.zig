@@ -15,9 +15,8 @@ pub const Term = struct {
     tty: std.fs.File,
     termios: std.os.linux.termios,
 
-    buffer: Window,
+    buffer: std.ArrayList(u8),
     cursor: Pos,
-    sub_windows: std.ArrayList(*Window),
 
     arena: std.heap.ArenaAllocator,
 
@@ -36,7 +35,6 @@ pub const Term = struct {
 
             .buffer = buffer,
             .cursor = Pos{},
-            .sub_windows = std.ArrayList(*Window).init(alloc),
 
             .arena = std.heap.ArenaAllocator.init(alloc),
         };
@@ -48,7 +46,6 @@ pub const Term = struct {
         try self.intoCanon();
         self.tty.close();
         self.buffer.deinit();
-        self.sub_windows.deinit();
         self.arena.deinit();
     }
 
@@ -170,6 +167,14 @@ pub const Term = struct {
         }
     }
 
+    pub fn writeAll(self: *Self, bytes: []const u8) !void {
+        try self.buffer.writer().writeAll(bytes);
+    }
+
+    pub fn print(self: *Self, comptime format: []const u8, args: anytype) !void {
+        try self.buffer.writer().print(format, args);
+    }
+
     pub fn flush(self: *Self) !void {
         errdefer self.deinit();
         try stdout_w.writeAll(try self.buffer.toOwnedSlice());
@@ -205,16 +210,16 @@ pub const Window = struct {
             const x = idx % win.quad.w + win.quad.x;
             const y = @divFloor(idx, win.quad.w) + win.quad.y;
             if (self.quad.w > x or self.quad.h < y) continue;
-            self.buffer.items[y*self.quad.w+x] = char;
+            self.buffer.items[y * self.quad.w + x] = char;
         }
     }
 
     fn writeCharAt(self: *Self, pos: Pos, char: Char) !void {
-        self.buffer.items[pos.y*self.quad.w+pos.x] = char;
+        self.buffer.items[pos.y * self.quad.w + pos.x] = char;
     }
 
     fn writeChar(self: *Self, char: Char) void {
-        self.buffer.items[self.cursor.y*self.quad.w+self.cursor.x] = char;
+        self.buffer.items[self.cursor.y * self.quad.w + self.cursor.x] = char;
         self.advanceCursor();
     }
 

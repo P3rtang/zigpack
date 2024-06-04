@@ -1,3 +1,5 @@
 /tui/zig-cache/
 /zig-cache/
 /zig-out/
+/.zig-cache/
+/tui/.zig-cache/

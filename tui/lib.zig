@@ -265,7 +265,6 @@ pub const Layout = struct {
         .drawFn = draw,
 
         .availablePosFn = availablePos,
-        .setPosFn = setPos,
 
         .getBorderFn = getBorder,
         .setBorderFn = setBorder,
@@ -278,12 +277,6 @@ pub const Layout = struct {
     fn draw(w: *Widget) !void {
         const self = w.cast(Self);
         w.setQuad(self.border.extendQuad(w.getQuad()));
-
-        if (w.term) |term| {
-            var win = try term.newWindow(w.getQuad());
-            win.
-        }
-
         try self.border.draw(w);
     }
 
@@ -306,12 +299,6 @@ pub const Layout = struct {
         }
 
         return pos;
-    }
-
-    fn setPos(w: *Widget, pos: Pos) void {
-        const self = w.cast(Self);
-        self.quad.x = pos.x;
-        self.quad.y = pos.y;
     }
 
     fn getBorder(w: *Widget) BorderStyle {
