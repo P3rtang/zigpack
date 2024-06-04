@@ -36,6 +36,15 @@ const Widget = struct {
         self.quad = q;
     }
 
+    fn getPaddedQuad(self: *Widget) Quad {
+        return Quad{
+            .x = self.quad.x + self.padding.left,
+            .y = self.quad.y + self.padding.top,
+            .w = self.quad.w - self.padding.left - self.padding.right,
+            .h = self.quad.h - self.padding.top - self.padding.bottom,
+        };
+    }
+
     fn availablePos(self: *Widget) Pos {
         return self.availablePosFn(self);
     }
@@ -119,28 +128,51 @@ const Direction = enum {
 };
 
 pub const Quad = struct {
-    x: u32 = 0,
-    y: u32 = 0,
-    w: u32 = 0,
-    h: u32 = 0,
+    x: usize = 0,
+    y: usize = 0,
+    w: usize = 0,
+    h: usize = 0,
 };
 
 pub const Pos = struct {
-    x: u32 = 0,
-    y: u32 = 0,
+    x: usize = 0,
+    y: usize = 0,
+};
+
+pub const Size = struct {
+    w: usize = 0,
+    h: usize = 0,
 };
 
 pub const Padding = struct {
-    left: u32 = 0,
-    top: u32 = 0,
-    right: u32 = 0,
-    bottom: u32 = 0,
+    left: usize = 0,
+    top: usize = 0,
+    right: usize = 0,
+    bottom: usize = 0,
+
+    pub fn uniform(pad: usize) Padding {
+        return Padding{
+            .left = pad,
+            .top = pad,
+            .right = pad,
+            .bottom = pad,
+        };
+    }
+
+    pub fn uniformTerm(pad: usize) Padding {
+        return Padding{
+            .left = pad * 2,
+            .top = pad,
+            .right = pad * 2,
+            .bottom = pad,
+        };
+    }
 };
 
 pub const UI = struct {
     const Self = @This();
 
-    background: ?u32,
+    background: ?usize,
     border: BorderStyle,
 
     cursor: ?Pos = null,
@@ -341,7 +373,7 @@ pub const TextBox = struct {
         .availablePosFn = availablePos,
     },
 
-    pub fn init(text: []const u8, size: struct { w: u32, h: u32 }) Self {
+    pub fn init(text: []const u8, size: struct { w: usize, h: usize }) Self {
         var this = Self{ .text = text };
         this.widget.setQuad(Quad{ .w = size.w, .h = size.h });
         return this;
@@ -356,7 +388,7 @@ pub const TextBox = struct {
 
         var lines = std.mem.splitScalar(u8, self.text, '\n');
 
-        var idx: u32 = 0;
+        var idx: usize = 0;
         while (lines.next()) |line| : (idx += 1) {
             if (w.term) |term| {
                 try term.move(w.getQuad().x, w.getQuad().y + idx);
@@ -429,11 +461,68 @@ pub const Button = struct {
 
 pub const List = struct {
     const Self = @This();
+
+    content: []const []const u8,
+    selection: usize = 0,
+    selection_style: SelectStyle = .{ .None = {} },
+
     widget: Widget = Widget{
         .drawFn = draw,
+        .availablePosFn = undefined,
     },
 
-    fn draw(w: *Widget) !void {
-        _ = w; // autofix
+    pub fn init(size: Size, content: []const []const u8) List {
+        var list = List{ .content = content };
+        list.widget.quad = Quad{ .w = size.w, .h = size.h };
+        return list;
     }
+
+    pub fn setPadding(self: *Self, padding: Padding) void {
+        self.widget.padding = padding;
+    }
+
+    pub fn setHighlight(self: *Self, idx: usize, style: SelectStyle) void {
+        self.selection = idx;
+        self.selection_style = style;
+    }
+
+    fn draw(w: *Widget) !void {
+        const self = w.cast(Self);
+
+        const pad_quad = w.getPaddedQuad();
+
+        for (self.content, 0..) |item, idx| {
+            // return when dropping below the padding at the bottom
+            if (idx > pad_quad.h) return;
+
+            try w.term.?.move(pad_quad.x, pad_quad.y + idx);
+
+            if (idx == self.selection) {
+                switch (self.selection_style) {
+                    .HighLight => |color| try w.term.?.print("\x1b[38;2;{};{};{}m> ", .{ color.red, color.green, color.blue }),
+                    .None => try w.term.?.writeAll("> "),
+                }
+            } else {
+                try w.term.?.writeAll("  ");
+            }
+
+            try w.term.?.print("{s}\x1b[39;49m", .{item[0..@min(pad_quad.w, item.len)]});
+        }
+    }
+};
+
+pub const SelectStyle = union(SelectStyleTag) {
+    None: void,
+    HighLight: Color,
+};
+
+pub const SelectStyleTag = enum {
+    None,
+    HighLight,
+};
+
+pub const Color = struct {
+    red: u8,
+    green: u8,
+    blue: u8,
 };

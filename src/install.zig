@@ -5,19 +5,29 @@ const c = @cImport({
     @cInclude("stdio.h");
 });
 
+pub const WindowData = struct {
+    mutex: std.Thread.Mutex,
+    step: usize,
+    steps: []const []const u8,
+};
+
 pub const InstallWindow = struct {
     const Self = @This();
 
     stdout_buf: *std.ArrayList(u8),
+
+    data: *WindowData,
+
     ui: tui.UI,
 
     is_running: bool = false,
     update_delay: u32 = 30,
 
-    pub fn init(alloc: std.mem.Allocator, stdoutBuf: *std.ArrayList(u8)) !InstallWindow {
+    pub fn init(alloc: std.mem.Allocator, stdoutBuf: *std.ArrayList(u8), data: *WindowData) !InstallWindow {
         return Self{
             .ui = try tui.UI.init(alloc),
             .stdout_buf = stdoutBuf,
+            .data = data,
         };
     }
 
@@ -35,8 +45,12 @@ pub const InstallWindow = struct {
             layout_steps.widget.setBorder(.Rounded);
             try self.ui.beginWidget(&layout_steps.widget);
             {
-                var textBox = tui.TextBox.init("zig", .{ .h = 40, .w = 40 });
-                try self.ui.beginWidget(&textBox.widget);
+                self.data.mutex.lock();
+                defer self.data.mutex.unlock();
+                var step_list = tui.List.init(.{ .w = 40, .h = 40 }, self.data.steps);
+                step_list.setPadding(tui.Padding.uniformTerm(1));
+                step_list.setHighlight(self.data.step, .{ .HighLight = .{ .red = 85, .green = 255, .blue = 255 } });
+                try self.ui.beginWidget(&step_list.widget);
                 try self.ui.endWidget();
             }
             try self.ui.endWidget();

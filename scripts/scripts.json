@@ -7,5 +7,10 @@
         "dependencies": [],
         "build_dependencies": [],
         "env": { "HOME": "/home/p3rtang" }
+    },
+
+    "test": {
+        "name": "test",
+        "script": 12344321
     }
 }

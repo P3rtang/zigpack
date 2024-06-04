@@ -130,19 +130,19 @@ pub const Term = struct {
         const y = split.next().?;
         const x = split.next().?;
 
-        return Pos{ .x = try std.fmt.parseInt(u32, x, 10), .y = try std.fmt.parseInt(u32, y, 10) };
+        return Pos{ .x = try std.fmt.parseInt(usize, x, 10), .y = try std.fmt.parseInt(usize, y, 10) };
     }
 
-    pub fn move(self: *Self, x: u32, y: u32) !void {
+    pub fn move(self: *Self, x: usize, y: usize) !void {
         try self.print("\x1b[{};{}f", .{ y + 1, x + 1 });
     }
 
-    pub fn movex(self: *Self, x: u32) !void {
+    pub fn movex(self: *Self, x: usize) !void {
         const cur = try self.getCursorPos();
         try self.move(x, cur.y);
     }
 
-    pub fn movey(self: *Self, y: u32) !void {
+    pub fn movey(self: *Self, y: usize) !void {
         const cur = try self.getCursorPos();
         try self.move(cur.x, y);
     }
@@ -151,17 +151,17 @@ pub const Term = struct {
         try self.print("\x1b[G", .{});
     }
 
-    pub fn drawHorzLine(self: *Self, pos: Pos, len: u32) !void {
+    pub fn drawHorzLine(self: *Self, pos: Pos, len: usize) !void {
         for (0..len) |i| {
-            const offset: u32 = @intCast(i);
+            const offset: usize = @intCast(i);
             try self.move(pos.x + offset, pos.y);
             try self.writeAll("─");
         }
     }
 
-    pub fn drawVertLine(self: *Self, pos: Pos, len: u32) !void {
+    pub fn drawVertLine(self: *Self, pos: Pos, len: usize) !void {
         for (0..len) |i| {
-            const offset: u32 = @intCast(i);
+            const offset: usize = @intCast(i);
             try self.move(pos.x, pos.y + offset);
             try self.writeAll("│");
         }

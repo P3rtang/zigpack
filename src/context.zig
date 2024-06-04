@@ -8,6 +8,7 @@ const nc = @cImport({
 });
 
 const InstallWin = @import("install.zig").InstallWindow;
+const WindowData = @import("install.zig").WindowData;
 
 const Self = @This();
 const Cmd = c.command(Self);
@@ -56,22 +57,50 @@ pub fn install(_: *Self, cmd: *Cmd) !void {
 
     var content_iter = content.map.iterator();
     while (content_iter.next()) |val| {
-        var script = try s.Script.init(arena.allocator(), val.value_ptr.*);
-        try script.collectOutput(&stdout_buf_w, &stdout_buf_w, .{});
+        const script = try s.Script.init(arena.allocator(), val.value_ptr.*);
         try scripts.put(script.data.name, script);
     }
 
     var thread: ?std.Thread = null;
+    const mutex = std.Thread.Mutex{};
+
     if (scripts.getPtr(program)) |p| {
-        thread = try std.Thread.spawn(.{}, s.Script.exec, .{p});
+        var script = try p.scriptContent();
+        var runner = try s.ScriptRunner.init(&script);
+        runner.collectOutput(&stdout_buf_w, &stdout_buf_w, .{});
+        defer runner.deinit();
+
+        var window_data = WindowData{ .mutex = mutex, .step = runner.step, .steps = runner.steps };
+
+        thread = try std.Thread.spawn(.{}, scriptRunnerThread, .{ &runner, &window_data });
+
+        var install_win = try InstallWin.init(
+            arena.allocator(),
+            &stdout_buf,
+            &window_data,
+        );
+
+        try install_win.run();
     } else {
         std.log.warn("No such program: `{s}`", .{program});
     }
-
-    var install_win = try InstallWin.init(arena.allocator(), &stdout_buf);
-    try install_win.run();
     // wait on scripts to finish
     if (thread) |t| t.join();
+}
+
+fn scriptRunnerThread(runner: *s.ScriptRunner, window_data: *WindowData) !void {
+    while (blk: {
+        runner.execNext() catch |err| switch (err) {
+            error.EndOfScript => break :blk false,
+            else => return err,
+        };
+        break :blk true;
+    }) {
+        window_data.mutex.lock();
+        defer window_data.mutex.unlock();
+
+        window_data.step = runner.step;
+    }
 }
 
 pub fn record(_: *Self, _: *Cmd) void {
