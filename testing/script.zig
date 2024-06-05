@@ -164,6 +164,9 @@ test "execute_script" {
         var script = try s.Script.fromJSON(alloc, json);
         defer script.deinit();
         script.value.scriptDir("./testing");
+        var iter = try script.value.scriptContent();
+
+        var runner = try s.ScriptRunner.init(&iter);
 
         var stdout = std.ArrayList(u8).init(alloc);
         var stderr = std.ArrayList(u8).init(alloc);
@@ -174,8 +177,8 @@ test "execute_script" {
             stderr.deinit();
         }
 
-        try script.value.collectOutput(&stdout_w, &stderr_w, .{});
-        try script.value.exec();
+        runner.collectOutput(&stdout_w, &stderr_w, .{});
+        try runner.execNext();
 
         try std.testing.expectStringStartsWith(stdout.items, "Hello, world!\n");
     }

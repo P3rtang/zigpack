@@ -188,6 +188,16 @@ pub const ScriptRunner = struct {
         self.step += 1;
         if (result.status != 0) std.debug.panic("Parent ERROR: {}", .{result});
     }
+
+    pub fn exec(self: *Self) !void {
+        while (blk: {
+            self.execNext() catch |err| switch (err) {
+                error.EndOfScript => break :blk false,
+                else => return err,
+            };
+            break :blk true;
+        }) {}
+    }
 };
 
 pub const ScriptIter = struct {
