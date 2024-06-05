@@ -2,10 +2,6 @@ const std = @import("std");
 const c = @import("cmd");
 const s = @import("script");
 const tui = @import("tui");
-const nc = @cImport({
-    @cInclude("curses.h");
-    @cInclude("locale.h");
-});
 
 const InstallWin = @import("install.zig").InstallWindow;
 const WindowData = @import("install.zig").WindowData;
@@ -128,24 +124,6 @@ fn try_record() !void {
     var ui = try tui.UI.init(gpa.allocator());
 
     defer ui.deinit();
-
-    while (true) {
-        std.time.sleep(10 * std.time.ns_per_ms);
-        var layout = tui.Layout{ .border = .Rounded };
-        try ui.beginWidget(&layout.widget);
-        {
-            mutex.lock();
-            defer mutex.unlock();
-            var textBox = tui.TextBox.init(try stdoutBuf.toOwnedSlice(), .{ .w = 80, .h = 20 });
-            try ui.beginWidget(&textBox.widget);
-            try ui.endWidget();
-        }
-        try ui.endWidget();
-    }
-
-    _ = nc.getch();
-
-    _ = nc.endwin();
 
     thread.join();
 }

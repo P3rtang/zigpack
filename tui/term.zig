@@ -5,6 +5,7 @@ const Quad = lib.Quad;
 const c = @cImport({
     @cInclude("stdio.h");
     @cInclude("fcntl.h");
+    @cInclude("sys/ioctl.h");
 });
 
 pub const Term = struct {
@@ -91,7 +92,11 @@ pub const Term = struct {
     }
 
     fn setNonBlock(self: *const Self, set: bool) !void {
-        _ = if (set) c.fcntl(self.tty.handle, c.F_SETFL, c.fcntl(self.tty.handle, c.F_GETFL) | c.O_NONBLOCK) else c.fcntl(self.tty.handle, c.F_SETFL, c.fcntl(self.tty.handle, c.F_GETFL) & ~c.O_NONBLOCK);
+        _ = if (set) {
+            _ = c.fcntl(self.tty.handle, c.F_SETFL, c.fcntl(self.tty.handle, c.F_GETFL) | c.O_NONBLOCK);
+        } else {
+            _ = c.fcntl(self.tty.handle, c.F_SETFL, c.fcntl(self.tty.handle, c.F_GETFL) & ~c.O_NONBLOCK);
+        };
     }
 
     pub fn pollChar(self: *Self) !?u8 {
@@ -178,12 +183,22 @@ pub const Term = struct {
     pub fn flush(self: *Self) !void {
         errdefer self.deinit();
         try stdout_w.writeAll(try self.buffer.toOwnedSlice());
+        try self.clearTerm();
     }
 
     pub fn newWindow(self: *Self, quad: Quad) !*Window {
         const win = Window.init(self.arena.allocator(), quad);
         self.sub_windows.append(&win);
         return &win;
+    }
+
+    pub fn getSize(_: *Self) !lib.Size {
+        var size = c.winsize{};
+        if (c.ioctl(std.io.getStdOut().handle, c.TIOCGWINSZ, &size) != 0) return error.IOCtlError;
+        return lib.Size{
+            .w = size.ws_col,
+            .h = size.ws_row,
+        };
     }
 };
 

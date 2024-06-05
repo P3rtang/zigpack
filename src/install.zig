@@ -1,8 +1,8 @@
 const std = @import("std");
 const tui = @import("tui");
 const c = @cImport({
-    @cInclude("termios.h");
     @cInclude("stdio.h");
+    @cInclude("termios.h");
 });
 
 pub const WindowData = struct {
@@ -37,30 +37,35 @@ pub const InstallWindow = struct {
     }
 
     pub fn update(self: *Self) !void {
-        var layout = tui.Layout.init();
-        layout.layoutDirection = .Horz;
-        try self.ui.beginWidget(&layout.widget);
+        const term_size = if (self.ui.term) |*term| try term.getSize() else tui.Size{};
+
+        const layout = try tui.Layout.init(&self.ui, .Horz);
+        try self.ui.beginWidget(layout);
         {
-            var layout_steps = tui.Layout.init();
-            layout_steps.widget.setBorder(.Rounded);
-            try self.ui.beginWidget(&layout_steps.widget);
+            var layout_steps = try tui.Layout.init(&self.ui, .Horz);
+            layout_steps.setBorder(.Rounded);
+
+            try self.ui.beginWidget(layout_steps);
             {
                 self.data.mutex.lock();
                 defer self.data.mutex.unlock();
-                var step_list = tui.List.init(.{ .w = 40, .h = 40 }, self.data.steps);
+
+                var step_list = try tui.List.init(&self.ui, .{ .w = @divFloor(term_size.w, 4), .h = term_size.h }, self.data.steps);
                 step_list.setPadding(tui.Padding.uniformTerm(1));
                 step_list.setHighlight(self.data.step, .{ .HighLight = .{ .red = 85, .green = 255, .blue = 255 } });
-                try self.ui.beginWidget(&step_list.widget);
+
+                try self.ui.beginWidget(step_list);
                 try self.ui.endWidget();
             }
             try self.ui.endWidget();
 
-            var layout_output = tui.Layout.init();
-            layout_output.widget.setBorder(.Rounded);
-            try self.ui.beginWidget(&layout_output.widget);
+            var layout_output = try tui.Layout.init(&self.ui, .Horz);
+            layout_output.setPadding(tui.Padding.uniformTerm(1));
+            layout_output.setBorder(.Rounded);
+            try self.ui.beginWidget(layout_output);
             {
-                var textBox = tui.TextBox.init(self.stdout_buf.items, .{ .h = 40, .w = 100 });
-                try self.ui.beginWidget(&textBox.widget);
+                const textBox = try tui.TextBox.init(&self.ui, self.stdout_buf.items, .{ .w = term_size.w - @divFloor(term_size.w, 4), .h = term_size.h });
+                try self.ui.beginWidget(textBox);
                 try self.ui.endWidget();
             }
             try self.ui.endWidget();
