@@ -291,7 +291,7 @@ pub const UI = struct {
         };
     }
 
-    pub fn deinit(self: Self) void {
+    pub fn deinit(self: *Self) void {
         if (self.term) |*t| t.deinit();
         self.arena.deinit();
     }

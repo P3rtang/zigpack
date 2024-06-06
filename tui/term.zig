@@ -21,10 +21,12 @@ pub const Term = struct {
 
     arena: std.heap.ArenaAllocator,
 
-    pub inline fn init(alloc: std.mem.Allocator) !Term {
+    pub fn init(alloc: std.mem.Allocator) !Term {
         const tty: std.fs.File = try std.fs.cwd().openFile("/dev/tty", std.fs.File.OpenFlags{ .mode = .read_write });
         var termios: std.os.linux.termios = undefined;
         _ = std.os.linux.tcgetattr(tty.handle, &termios);
+
+        const arena = std.heap.ArenaAllocator.init(alloc);
 
         const buffer = std.ArrayList(u8).init(alloc);
 
@@ -33,15 +35,13 @@ pub const Term = struct {
         return Term{
             .tty = tty,
             .termios = termios,
-
             .buffer = buffer,
             .cursor = Pos{},
-
-            .arena = std.heap.ArenaAllocator.init(alloc),
+            .arena = arena,
         };
     }
 
-    pub fn deinit(self: *const Term) void {
+    pub fn deinit(self: *Term) void {
         stdout_w.writeAll("\x1b[?25h") catch {};
         _ = c.fcntl(self.tty.handle, c.F_SETFL, c.fcntl(self.tty.handle, c.F_GETFL) & ~c.O_NONBLOCK);
         try self.intoCanon();
@@ -72,7 +72,7 @@ pub const Term = struct {
         _ = std.os.linux.tcsetattr(self.tty.handle, .FLUSH, &raw);
     }
 
-    pub fn intoCanon(self: *const Self) !void {
+    pub fn intoCanon(self: *Self) !void {
         try self.setNonBlock(false);
 
         stdout_w.writeAll("\x1B[?47l") catch {};

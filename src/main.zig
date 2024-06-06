@@ -22,7 +22,7 @@ pub fn main() !void {
         try install.addArgument("program", .{ .String = "" });
     }
     {
-        var ctx = cmdContext{ .cb = cmdContext.record };
+        var ctx = cmdContext{ .tryCb = cmdContext.record };
         _ = try cmd.addCommand(.{ .use = "record", .serve = &ctx });
     }
     {

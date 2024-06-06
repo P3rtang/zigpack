@@ -99,11 +99,7 @@ fn scriptRunnerThread(runner: *s.ScriptRunner, window_data: *WindowData) !void {
     }
 }
 
-pub fn record(_: *Self, _: *Cmd) void {
-    try_record() catch |err| std.debug.panicExtra(@errorReturnTrace(), null, "{any}", .{err});
-}
-
-fn try_record() !void {
+pub fn record(_: *Self, _: *Cmd) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     // displaying unicode characters in curses needs this and cursesw in build.zig
     var stdoutBuf = std.ArrayList(u8).init(gpa.allocator());
