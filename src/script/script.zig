@@ -155,7 +155,7 @@ pub const ScriptRunner = struct {
 
                 const args: [*:null]?[*:0]const u8 = try t.toOwnedSliceSentinel(null);
                 const result = std.posix.execvpeZ(args[0].?, args, &.{null});
-                std.debug.panic("Child ERROR: {}", .{result});
+                return result;
             } else {
                 try self.forkParent(0, pipes);
             }
@@ -181,12 +181,12 @@ pub const ScriptRunner = struct {
                 break;
             }
 
-            try self.stderr.?.writeAll(&buf);
+            try self.stderr.?.writeAll(buf[0..size]);
         }
 
         const result = std.posix.waitpid(childPid, 0);
         self.step += 1;
-        if (result.status != 0) std.debug.panic("Parent ERROR: {}", .{result});
+        if (result.status != 0) return error.CommandError;
     }
 
     pub fn exec(self: *Self) !void {
@@ -244,12 +244,6 @@ pub const ScriptIter = struct {
                     kind = .DoubleQuote;
                 },
 
-                '\\' => {
-                    i += 1;
-                    try values.append(content[i]);
-                    kind = .Word;
-                },
-
                 '$' => {
                     var key = std.ArrayList(u8).init(arena.allocator());
                     kind = .Word;
@@ -269,6 +263,18 @@ pub const ScriptIter = struct {
                         return error.NoEnvironment;
                     }
                     i -= 1;
+                },
+
+                '~' => {
+                    if (std.posix.getenv("HOME")) |home| {
+                        try values.appendSlice(home);
+                    } else {
+                        return error.NoEnvironment;
+                    }
+                },
+
+                '\x1b' => {
+                    return error.NotImplemented;
                 },
 
                 else => |char| {

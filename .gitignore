@@ -1,6 +1,9 @@
-/tui/zig-cache/
 /zig-cache/
 /zig-out/
+/Session.vim
+/tui/zig-cache/
 /.zig-cache/
 /tui/.zig-cache/
 /cmd/zig-cache/
+/out
+/scripts/*

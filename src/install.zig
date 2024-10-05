@@ -50,7 +50,11 @@ pub const InstallWindow = struct {
                 self.data.mutex.lock();
                 defer self.data.mutex.unlock();
 
-                var step_list = try tui.List.init(&self.ui, .{ .w = @divFloor(term_size.w, 4), .h = term_size.h }, self.data.steps);
+                var step_list = try tui.List.init(
+                    &self.ui,
+                    self.data.steps,
+                    .{ .w = @divFloor(term_size.w, 4), .h = term_size.h },
+                );
                 step_list.setPadding(tui.Padding.uniformTerm(1));
                 step_list.setHighlight(self.data.step, .{ .HighLight = .{ .red = 85, .green = 255, .blue = 255 } });
 
@@ -64,7 +68,11 @@ pub const InstallWindow = struct {
             layout_output.setBorder(.Rounded);
             try self.ui.beginWidget(layout_output);
             {
-                const textBox = try tui.TextBox.init(&self.ui, self.stdout_buf.items, .{ .w = term_size.w - @divFloor(term_size.w, 4), .h = term_size.h });
+                const textBox = try tui.TextBox.init(
+                    &self.ui,
+                    self.stdout_buf.items,
+                    .{ .w = term_size.w - @divFloor(term_size.w, 4), .h = term_size.h },
+                );
                 try self.ui.beginWidget(textBox);
                 try self.ui.endWidget();
             }
@@ -80,9 +88,9 @@ pub const InstallWindow = struct {
 
             std.time.sleep(self.update_delay * std.time.ns_per_ms);
 
-            if (try self.ui.term.?.pollChar()) |char| {
+            if (try self.ui.term.?.pollKey()) |char| {
                 switch (char) {
-                    'q' => self.deinit(),
+                    tui.Key{ .CHAR = 'q' } => self.deinit(),
                     else => {},
                 }
             }

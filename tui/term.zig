@@ -42,7 +42,7 @@ pub const Term = struct {
     }
 
     pub fn deinit(self: *Term) void {
-        stdout_w.writeAll("\x1b[?25h") catch {};
+        self.showCursor() catch {};
         _ = c.fcntl(self.tty.handle, c.F_SETFL, c.fcntl(self.tty.handle, c.F_GETFL) & ~c.O_NONBLOCK);
         try self.intoCanon();
         self.tty.close();
@@ -99,22 +99,27 @@ pub const Term = struct {
         };
     }
 
-    pub fn pollChar(self: *Self) !?u8 {
+    pub fn pollKey(self: *Self) !?Key {
         var buffer: [1]u8 = undefined;
         const size = self.tty.read(&buffer) catch |err| switch (err) {
             error.WouldBlock => return null,
             else => return error.ReadError,
         };
 
-        switch (size) {
-            1 => {
-                return buffer[0];
-            },
-            else => unreachable,
-        }
+        if (size != 1) unreachable;
+
+        return switch (buffer[0]) {
+            3 => Key{ .CTRLC = {} },
+            8 => Key{ .BACKSPACE = {} },
+            9 => Key{ .TAB = {} },
+            13 => Key{ .ENTER = {} },
+            27 => Key{ .ESC = {} },
+            127 => Key{ .DEL = {} },
+            else => |char| Key{ .CHAR = char },
+        };
     }
 
-    pub fn getCursorPos(self: *Self) !Pos {
+    fn getHardwareCursorPos(self: *Self) !Pos {
         errdefer self.deinit();
 
         try self.setNonBlock(false);
@@ -136,6 +141,19 @@ pub const Term = struct {
         const x = split.next().?;
 
         return Pos{ .x = try std.fmt.parseInt(usize, x, 10), .y = try std.fmt.parseInt(usize, y, 10) };
+    }
+
+    pub fn moveCursor(self: *Self, x: usize, y: usize) !void {
+        self.cursor.x = x;
+        self.cursor.y = y;
+    }
+
+    pub fn showCursor(_: *Self) !void {
+        try stdout_w.writeAll("\x1b[?25h");
+    }
+
+    pub fn hideCursor(_: *Self) !void {
+        try stdout_w.writeAll("\x1b[?25l");
     }
 
     pub fn move(self: *Self, x: usize, y: usize) !void {
@@ -176,12 +194,17 @@ pub const Term = struct {
         try self.buffer.writer().writeAll(bytes);
     }
 
+    pub fn writeByte(self: *Self, byte: u8) !void {
+        try self.buffer.writer().writeByte(byte);
+    }
+
     pub fn print(self: *Self, comptime format: []const u8, args: anytype) !void {
         try self.buffer.writer().print(format, args);
     }
 
     pub fn flush(self: *Self) !void {
         errdefer self.deinit();
+        try self.move(self.cursor.x, self.cursor.y);
         try stdout_w.writeAll(try self.buffer.toOwnedSlice());
         try self.clearTerm();
     }
@@ -274,4 +297,24 @@ pub const Color = struct {
 pub const WrapBehaviour = enum {
     Wrap,
     Nowrap,
+};
+
+pub const Key = union(KeyCode) {
+    CTRLC,
+    BACKSPACE,
+    TAB,
+    ENTER,
+    ESC,
+    DEL,
+    CHAR: u8,
+};
+
+pub const KeyCode = enum(u8) {
+    CTRLC = 3,
+    BACKSPACE = 8,
+    TAB = 9,
+    ENTER = 13,
+    ESC = 27,
+    DEL = 127,
+    CHAR,
 };

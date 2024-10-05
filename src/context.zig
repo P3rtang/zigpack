@@ -100,66 +100,19 @@ fn scriptRunnerThread(runner: *s.ScriptRunner, window_data: *WindowData) !void {
 }
 
 pub fn record(_: *Self, _: *Cmd) !void {
+    const RecordUI = @import("record.zig").RecordUI;
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    // displaying unicode characters in curses needs this and cursesw in build.zig
-    var stdoutBuf = std.ArrayList(u8).init(gpa.allocator());
-    var stderrBuf = std.ArrayList(u8).init(gpa.allocator());
 
-    defer {
-        stdoutBuf.deinit();
-        stderrBuf.deinit();
-    }
-
-    var mutex = std.Thread.Mutex{};
-    const thread = try std.Thread.spawn(.{}, loop, .{
-        &mutex,
-        stdoutBuf.writer().any(),
-        stderrBuf.writer().any(),
-    });
-
-    var ui = try tui.UI.init(gpa.allocator());
-
-    defer ui.deinit();
-
-    thread.join();
-}
-
-fn loop(mutex: *std.Thread.Mutex, stdout_w: std.io.AnyWriter, stderr_w: std.io.AnyWriter) !void {
-    var alloc = std.heap.GeneralPurposeAllocator(.{}){};
-
-    const args: []const []const u8 = &.{ "echo", "Hello, world!" };
-    var child = std.process.Child.init(args, alloc.allocator());
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
-
-    var out = std.ArrayList(u8).init(alloc.allocator());
-    var err = std.ArrayList(u8).init(alloc.allocator());
-    defer {
-        out.deinit();
-        err.deinit();
-    }
-
-    inline for (0..5) |_| {
-        std.time.sleep(2 * std.time.ns_per_s);
-        try child.spawn();
-        try child.collectOutput(&out, &err, 4096);
-        _ = try child.wait();
-
-        mutex.lock();
-        defer mutex.unlock();
-        try stdout_w.writeAll(out.items);
-        try stderr_w.writeAll(err.items);
-    }
+    var record_ui = try RecordUI.init(gpa.allocator());
+    defer record_ui.deinit();
+    try record_ui.run();
 }
 
 pub fn testing(_: *Self, _: *Cmd) !void {
-    var alloc = std.heap.GeneralPurposeAllocator(.{}){};
+    const TestUI = @import("test_ui.zig").TestUI;
 
-    var ui = try tui.UI.init(alloc.allocator());
-    defer ui.deinit();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
-    const pos = try ui.term.?.getCursorPos();
-    try stdout.print("{any}", .{pos});
-
-    std.time.sleep(4 * std.time.ns_per_s);
+    var test_ui = try TestUI.init(gpa.allocator());
+    try test_ui.run();
 }
