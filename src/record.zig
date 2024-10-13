@@ -73,7 +73,7 @@ pub const RecordUI = struct {
                 try self.ui.endWidget();
 
                 var input = try tui.Input(InputKeyHandler).init(&self.ui, &self.input_state, @divFloor(term_size.w, 2) - 3);
-                const key_handler = InputKeyHandler{ .runner = self, .onKeyFn = input_on_key };
+                const key_handler = InputKeyHandler{ .runner = self, .onKeyFn = handle_key };
                 input.key_handler = &key_handler;
                 try self.ui.beginWidget(input);
                 try self.ui.endWidget();
@@ -119,6 +119,15 @@ pub const RecordUI = struct {
     fn handle_key(self: *Self, key: tui.Key) !void {
         switch (key) {
             .CTRLC => self.is_running = false,
+            .ENTER => {
+                var script_iter = try s.ScriptIter.init(self.alloc, self.input_state.input.items, .{});
+                var runner = try s.ScriptRunner.init(&script_iter);
+                var writer = self.output_stream.writer().any();
+                runner.collectOutput(&writer, &writer, .{});
+                runner.exec() catch |err| {
+                    try self.output_stream.writer().print("{!}", .{err});
+                };
+            },
             .ESC => self.input_state.hasFocus = false,
             .CHAR => |c| {
                 if (!self.input_state.hasFocus) {
@@ -130,21 +139,6 @@ pub const RecordUI = struct {
                 }
             },
             else => {},
-        }
-    }
-
-    fn input_on_key(self: *Self, key: tui.Key) !void {
-        switch (key) {
-            .ENTER => {
-                var script_iter = try s.ScriptIter.init(self.alloc, self.input_state.input.items, .{});
-                var runner = try s.ScriptRunner.init(&script_iter);
-                var writer = self.output_stream.writer().any();
-                runner.collectOutput(&writer, &writer, .{});
-                runner.exec() catch |err| {
-                    try self.output_stream.writer().print("{}", .{err});
-                };
-            },
-            else => try self.handle_key(key),
         }
     }
 };

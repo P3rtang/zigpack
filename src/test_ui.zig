@@ -84,7 +84,7 @@ pub const TestUI = struct {
                 {
                     const timer_text = try tui.TextBox.init(
                         &self.ui,
-                        try std.fmt.allocPrint(self.alloc, "update timer: {}μs", .{self.update_timer}),
+                        try std.fmt.allocPrint(self.alloc, "update timer: {d:.3}μms", .{@as(f64, @floatFromInt(self.update_timer)) / 1000.0}),
                         .{ .w = 24, .h = @divFloor(term_size.h, 3) },
                     );
                     try self.ui.beginWidget(timer_text);
@@ -100,8 +100,11 @@ pub const TestUI = struct {
     fn input_on_key(self: *Self, key: tui.Key) !void {
         switch (key) {
             .ENTER => {
-                try self.input_list.append(try self.input_state.input.toOwnedSlice());
+                if (self.input_state.input.items.len > 0) {
+                    try self.input_list.append(try self.input_state.input.toOwnedSlice());
+                }
             },
+            .ESC => self.input_state.hasFocus = false,
             else => {},
         }
     }

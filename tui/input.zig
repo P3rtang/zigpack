@@ -36,7 +36,7 @@ pub fn CursorWidget(comptime widget: Widget) type {
             if (w.term == null) return;
             if (self.hasFocus) {
                 try w.term.?.moveCursor(self.cursor.x, self.cursor.y);
-                try w.term.?.showCursor();
+                try w.term.?.showCursor(.Line);
             } else {
                 try w.term.?.hideCursor();
             }

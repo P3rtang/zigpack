@@ -1,5 +1,6 @@
 const std = @import("std");
 const s = @import("script");
+const debug = @import("debug");
 
 test "parse_json" {
     const json =
@@ -113,6 +114,43 @@ test "quotes" {
 
         const child: std.process.Child = (try s_iter.next()).?;
         try std.testing.expectEqualStrings("\"Hello, world!\"", child.argv[1]);
+    }
+}
+
+test "dots" {
+    const script =
+        \\./testing/42069.sh
+    ;
+
+    const alloc = std.testing.allocator;
+    {
+        var s_iter = try s.ScriptIter.init(alloc, script, .{});
+        defer s_iter.deinit();
+
+        const child: std.process.Child = (try s_iter.next()).?;
+
+        const cwd = try std.fs.cwd().realpathAlloc(std.testing.allocator, ".");
+        const script_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/testing/42069.sh", .{cwd});
+        defer std.testing.allocator.free(cwd);
+        defer std.testing.allocator.free(script_path);
+
+        try std.testing.expectEqualStrings(script_path, child.argv[0]);
+    }
+    {
+        var s_iter = try s.ScriptIter.init(alloc, script, .{});
+        defer s_iter.deinit();
+
+        var runner = try s.ScriptRunner.init(&s_iter);
+        var stdout = std.ArrayList(u8).init(alloc);
+        var stdout_w = stdout.writer().any();
+        defer {
+            stdout.deinit();
+        }
+
+        runner.collectOutput(&stdout_w, &stdout_w, .{});
+        try runner.exec();
+
+        try std.testing.expectEqualStrings("Hello, world!\nHello, world!\nHello, world!\n", stdout.items);
     }
 }
 

@@ -42,7 +42,7 @@ pub const Term = struct {
     }
 
     pub fn deinit(self: *Term) void {
-        self.showCursor() catch {};
+        self.showCursor(.Block) catch {};
         _ = c.fcntl(self.tty.handle, c.F_SETFL, c.fcntl(self.tty.handle, c.F_GETFL) & ~c.O_NONBLOCK);
         try self.intoCanon();
         self.tty.close();
@@ -109,7 +109,10 @@ pub const Term = struct {
         if (size != 1) unreachable;
 
         return switch (buffer[0]) {
-            3 => Key{ .CTRLC = {} },
+            3 => {
+                self.deinit();
+                std.process.exit(0);
+            },
             8 => Key{ .BACKSPACE = {} },
             9 => Key{ .TAB = {} },
             13 => Key{ .ENTER = {} },
@@ -148,12 +151,17 @@ pub const Term = struct {
         self.cursor.y = y;
     }
 
-    pub fn showCursor(_: *Self) !void {
+    pub fn showCursor(_: *Self, cursor_type: CursorType) !void {
         try stdout_w.writeAll("\x1b[?25h");
+        switch (cursor_type) {
+            .Block => try stdout_w.writeAll("\x1b[2 q"),
+            .Line => try stdout_w.writeAll("\x1b[5 q"),
+            .Underline => {},
+        }
     }
 
     pub fn hideCursor(_: *Self) !void {
-        try stdout_w.writeAll("\x1b[?25l");
+        try stdout_w.writeAll("\x1b[?25l\x1b[?50l");
     }
 
     pub fn move(self: *Self, x: usize, y: usize) !void {
@@ -317,4 +325,10 @@ pub const KeyCode = enum(u8) {
     ESC = 27,
     DEL = 127,
     CHAR,
+};
+
+pub const CursorType = enum {
+    Block,
+    Line,
+    Underline,
 };

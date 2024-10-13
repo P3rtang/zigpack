@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = @import("cmd");
 const script = @import("script");
+const debug = @import("debug");
 const cmdContext = @import("context.zig");
 
 pub fn main() !void {

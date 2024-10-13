@@ -27,7 +27,8 @@ pub fn build(b: *std.Build) !void {
 
     try SetupModules(b, &main.root_module, &.{
         .{ .name = "string", .path = b.path("src/string.zig") },
-        .{ .name = "script", .path = b.path("src/script/script.zig") },
+        .{ .name = "debug", .path = b.path("src/debug_print.zig") },
+        .{ .name = "script", .path = b.path("src/script/mod.zig"), .module_deps = &.{"debug"} },
         .{ .name = "cmd", .path = b.path("cmd/lib.zig"), .module_deps = &.{"string"} },
         .{ .name = "tui", .path = b.path("tui/lib.zig") },
     });
@@ -37,6 +38,7 @@ pub fn build(b: *std.Build) !void {
     main.addIncludePath(b.path("src/string.zig"));
     main.addIncludePath(b.path("cmd/lib.zig"));
     main.addIncludePath(b.path("tui/lib.zig"));
+    main.addIncludePath(b.path("src/debug_print.zig"));
 
     const run_cmd = b.addRunArtifact(main);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -55,7 +57,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     try SetupTestDirs(b, test_step, &.{
-        .{ .path = "testing", .config = .{ .module_deps = &.{ "string", "script" }, .useLibC = true } },
+        .{ .path = "testing", .config = .{ .module_deps = &.{ "string", "script", "debug" }, .useLibC = true } },
     });
 
     const tui_test = b.step("tui", "Run tui unit tests");

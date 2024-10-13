@@ -65,6 +65,7 @@ pub fn command(comptime T: type) type {
             if (parser.index == 0) {
                 self.config.use = parser.next().?.content;
             }
+
             self.argIndex = 0;
             while (parser.next()) |token| {
                 switch (token.kind) {

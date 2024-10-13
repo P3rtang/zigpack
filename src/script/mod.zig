@@ -1,13 +1,8 @@
+// TODO: refactor split file
 const std = @import("std");
 const str = @import("string").str;
-const c = @cImport({
-    @cInclude("stdio.h");
-    @cInclude("fcntl.h");
-    @cInclude("pty.h");
-    @cInclude("unistd.h");
-    @cInclude("sys/wait.h");
-    @cInclude("sys/types.h");
-});
+const debug = @import("debug");
+pub const ScriptRunner = @import("runner.zig");
 
 pub const ScriptData = struct {
     name: []const u8,
@@ -101,105 +96,6 @@ pub const Script = struct {
     }
 };
 
-pub const ScriptRunner = struct {
-    const Self = @This();
-
-    stdout: ?*std.io.AnyWriter = null,
-    stderr: ?*std.io.AnyWriter = null,
-    collect_options: CollectOptions = CollectOptions{},
-
-    step: usize = 0,
-    steps: []const []const u8,
-    iterator: *ScriptIter,
-
-    pub fn init(iter: *ScriptIter) !Self {
-        var iterator = iter;
-        const steps = try iterator.steps();
-        iterator.reset();
-        return Self{
-            .steps = steps,
-            .iterator = iterator,
-        };
-    }
-
-    pub fn deinit(self: *const Self) void {
-        self.iterator.deinit();
-    }
-
-    pub fn collectOutput(self: *Self, stdout: *std.io.AnyWriter, stderr: *std.io.AnyWriter, options: CollectOptions) void {
-        self.stdout = stdout;
-        self.stderr = stderr;
-        self.collect_options = options;
-    }
-
-    pub fn execNext(self: *Self) !void {
-        var alloc = std.heap.GeneralPurposeAllocator(.{}){};
-
-        if (try self.iterator.next()) |child| {
-            const pipes = try std.posix.pipe2(.{ .NONBLOCK = true });
-            const pid = std.os.linux.fork();
-
-            if (pid == 0) {
-                std.posix.close(pipes[0]);
-                try std.posix.dup2(pipes[1], std.posix.STDERR_FILENO);
-                try std.posix.dup2(pipes[1], std.posix.STDOUT_FILENO);
-
-                var t = std.ArrayList(?[*:0]const u8).init(alloc.allocator());
-                defer t.deinit();
-
-                for (child.argv[0..]) |arg| {
-                    var null_arg: [:0]u8 = try alloc.allocator().allocSentinel(u8, arg.len, 0);
-                    @memcpy(null_arg[0..arg.len], arg);
-                    try t.append(null_arg);
-                }
-
-                const args: [*:null]?[*:0]const u8 = try t.toOwnedSliceSentinel(null);
-                const result = std.posix.execvpeZ(args[0].?, args, &.{null});
-                return result;
-            } else {
-                try self.forkParent(0, pipes);
-            }
-        } else {
-            return error.EndOfScript;
-        }
-
-        if (alloc.detectLeaks()) return error.MemoryLeaked;
-    }
-
-    fn forkParent(self: *Self, childPid: i32, pipes: [2]i32) !void {
-        std.posix.close(pipes[1]);
-        while (true) {
-            std.time.sleep(5 * std.time.ns_per_ms);
-            var buf: [16000]u8 = undefined;
-
-            const size = std.posix.read(pipes[0], &buf) catch |err| switch (err) {
-                error.WouldBlock => continue,
-                else => return err,
-            };
-
-            if (size == 0) {
-                break;
-            }
-
-            try self.stderr.?.writeAll(buf[0..size]);
-        }
-
-        const result = std.posix.waitpid(childPid, 0);
-        self.step += 1;
-        if (result.status != 0) return error.CommandError;
-    }
-
-    pub fn exec(self: *Self) !void {
-        while (blk: {
-            self.execNext() catch |err| switch (err) {
-                error.EndOfScript => break :blk false,
-                else => return err,
-            };
-            break :blk true;
-        }) {}
-    }
-};
-
 pub const ScriptIter = struct {
     index: usize = 0,
     step: usize = 0,
@@ -248,7 +144,7 @@ pub const ScriptIter = struct {
                     var key = std.ArrayList(u8).init(arena.allocator());
                     kind = .Word;
                     i += 1;
-                    while (std.ascii.isAlphabetic(content[i])) : (i += 1) {
+                    while (content.len > i and std.ascii.isAlphabetic(content[i])) : (i += 1) {
                         try key.append(content[i]);
                     }
 
@@ -259,18 +155,40 @@ pub const ScriptIter = struct {
                             std.log.warn("Unknown Environment variable {s}", .{key.items});
                             return error.UnknownEnvVar;
                         }
+                    } else if (std.posix.getenv(key.items)) |env| {
+                        try values.appendSlice(env);
                     } else {
                         return error.NoEnvironment;
                     }
                     i -= 1;
                 },
 
+                // TODO: Add a separate token and move logic to token parser
                 '~' => {
                     if (std.posix.getenv("HOME")) |home| {
+                        kind = .Word;
                         try values.appendSlice(home);
                     } else {
                         return error.NoEnvironment;
                     }
+                },
+
+                '.' => {
+                    if (kind == .Word) try addToken(&tokens, kind.?, try values.toOwnedSlice());
+                    try tokens.append(.{ .Dot = '.' });
+                    kind = .Dot;
+                },
+
+                '/' => {
+                    if (kind == .Word) try addToken(&tokens, kind.?, try values.toOwnedSlice());
+                    try tokens.append(.{ .Slash = '/' });
+                    kind = .Slash;
+                },
+
+                '#' => {
+                    if (kind == .Word) try addToken(&tokens, kind.?, try values.toOwnedSlice());
+                    kind = .Hash;
+                    while (content.len > i and content[i] != '\n') : (i += 1) {}
                 },
 
                 '\x1b' => {
@@ -279,26 +197,27 @@ pub const ScriptIter = struct {
 
                 else => |char| {
                     try values.append(char);
-                    if (kind == null) {
+                    if (kind) |k| {
+                        switch (k) {
+                            .Word => {},
+                            .Value => {
+                                if (!std.ascii.isDigit(char)) {
+                                    return error.InvalidExpression;
+                                }
+                            },
+                            else => {
+                                if (std.ascii.isDigit(char)) {
+                                    kind = .Value;
+                                }
+                                kind = .Word;
+                            },
+                        }
+                    } else {
                         if (std.ascii.isDigit(char)) {
                             kind = .Value;
                         }
                         kind = .Word;
                         continue;
-                    }
-                    switch (kind.?) {
-                        .Word => {},
-                        .Value => {
-                            if (!std.ascii.isDigit(char)) {
-                                return error.InvalidExpression;
-                            }
-                        },
-                        else => {
-                            if (std.ascii.isDigit(char)) {
-                                kind = .Value;
-                            }
-                            kind = .Word;
-                        },
                     }
                 },
             }
@@ -338,6 +257,15 @@ pub const ScriptIter = struct {
             .NewLine => {
                 try list.append(.{ .NewLine = '\n' });
             },
+            .Dot => {
+                try list.append(.{ .Dot = '.' });
+            },
+            .Slash => {
+                try list.append(.{ .Slash = '/' });
+            },
+            .Hash => {
+                try list.append(.{ .Hash = '#' });
+            },
         }
     }
 
@@ -357,18 +285,42 @@ pub const ScriptIter = struct {
 
     pub fn nextArgs(self: *ScriptIter) !?[]const []const u8 {
         var args = std.ArrayList([]const u8).init(self.alloc.allocator());
+        var argBuffer = std.ArrayList(u8).init(self.alloc.allocator());
 
         while (self.index < self.content.len) : (self.index += 1) {
             switch (self.content[self.index]) {
-                .Word => |val| try args.append(val),
-                .Value => |val| try args.append(try std.fmt.allocPrint(self.alloc.allocator(), "{d}", .{val})),
-                .DoubleQuote => |val| try args.append(try std.fmt.allocPrint(self.alloc.allocator(), "{s}", .{val})),
-                .Space => {},
-                .NewLine => {
-                    self.index += 1;
-                    break;
+                .Word => |val| try argBuffer.appendSlice(val),
+                .Value => |val| try argBuffer.appendSlice(try std.fmt.allocPrint(self.alloc.allocator(), "{d}", .{val})),
+                .DoubleQuote => |val| try argBuffer.appendSlice(try std.fmt.allocPrint(self.alloc.allocator(), "{s}", .{val})),
+                .Space => |_| {
+                    const arg = try argBuffer.toOwnedSlice();
+                    try args.append(arg);
+                    continue;
                 },
+                .NewLine => {
+                    if (argBuffer.items.len > 0) {
+                        try args.append(try argBuffer.toOwnedSlice());
+                    }
+                    if (args.items.len > 0) {
+                        break;
+                    }
+                },
+                .Dot => {
+                    if (args.items.len == 0 and self.content.len > self.index + 1 and self.content[self.index + 1] == .Slash) {
+                        try argBuffer.appendSlice(try std.fs.cwd().realpathAlloc(self.alloc.allocator(), "."));
+                    } else {
+                        try argBuffer.append('.');
+                    }
+                },
+                .Slash => {
+                    try argBuffer.append('/');
+                },
+                .Hash => {},
             }
+        }
+
+        if (argBuffer.items.len > 0) {
+            try args.append(argBuffer.items);
         }
         if (args.items.len > 0) {
             self.step += 1;
@@ -394,12 +346,16 @@ pub const ScriptIter = struct {
     }
 };
 
+// TODO: Store token location
 const ScriptToken = union(TokenKind) {
     Word: []const u8,
     Value: i32,
     NewLine: u8,
     Space: u8,
     DoubleQuote: []const u8,
+    Dot: u8,
+    Slash: u8,
+    Hash: u8,
 };
 
 const TokenKind = enum {
@@ -408,8 +364,11 @@ const TokenKind = enum {
     NewLine,
     Space,
     DoubleQuote,
+    Dot,
+    Slash,
+    Hash,
 };
 
-const CollectOptions = struct {
+pub const CollectOptions = struct {
     Verbose: bool = false,
 };
