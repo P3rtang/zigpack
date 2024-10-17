@@ -1,3 +1,5 @@
+// TODO: make the writer more generic
+// TODO: add a terminal mock to test output
 const std = @import("std");
 const lib = @import("lib.zig");
 const Pos = lib.Pos;

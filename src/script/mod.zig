@@ -111,22 +111,39 @@ pub const ScriptIter = struct {
         var kind: ?TokenKind = null;
         var i: usize = 0;
 
+        var line: usize = 0;
+        var char: usize = 0;
+
         while (i < content.len) : (i += 1) {
             switch (content[i]) {
                 '\n' => {
                     if (kind) |k| {
-                        try addToken(&tokens, k, try values.toOwnedSlice());
+                        try addToken(
+                            &tokens, k, try values.toOwnedSlice(),
+                            .{ .line = line, .char = char, .file = null },
+                        );
                     }
-                    try tokens.append(.{ .NewLine = '\n' });
+                    try tokens.append(.{ .NewLine = .{ 
+                        .content = '\n',
+                        .location = .{ .line = line, .char = char, .file = null },
+                    }});
                     kind = .NewLine;
+                    line += 1;
                 },
 
                 ' ' => {
                     if (kind) |k| {
-                        try addToken(&tokens, k, try values.toOwnedSlice());
+                        try addToken(
+                            &tokens, k, try values.toOwnedSlice(),
+                            .{ .line = line, .char = char, .file = null },
+                        );
                     }
-                    try tokens.append(.{ .Space = ' ' });
+                    try tokens.append(.{ .Space = .{
+                        .content = ' ',
+                        .location = .{ .line = line, .char = char, .file = null },
+                    } });
                     kind = .Space;
+                    char += 1;
                 },
 
                 '"' => {
@@ -136,16 +153,20 @@ pub const ScriptIter = struct {
                             i += 1;
                         }
                         try values.append(content[i]);
+                        char += 1;
                     }
                     kind = .DoubleQuote;
+                    char += 1;
                 },
 
+                // TODO: Add a separate token and move logic to token parser
                 '$' => {
                     var key = std.ArrayList(u8).init(arena.allocator());
                     kind = .Word;
                     i += 1;
                     while (content.len > i and std.ascii.isAlphabetic(content[i])) : (i += 1) {
                         try key.append(content[i]);
+                        char += 1;
                     }
 
                     if (options.env) |env| {
@@ -161,6 +182,7 @@ pub const ScriptIter = struct {
                         return error.NoEnvironment;
                     }
                     i -= 1;
+                    char += 1;
                 },
 
                 // TODO: Add a separate token and move logic to token parser
@@ -171,54 +193,69 @@ pub const ScriptIter = struct {
                     } else {
                         return error.NoEnvironment;
                     }
+                    char += 1;
                 },
 
                 '.' => {
-                    if (kind == .Word) try addToken(&tokens, kind.?, try values.toOwnedSlice());
+                    if (kind == .Word) try addToken(
+                        &tokens, kind.?, try values.toOwnedSlice(),
+                        .{ .line = line, .char = char, .file = null },
+                    );
                     try tokens.append(.{ .Dot = '.' });
                     kind = .Dot;
+                    char += 1;
                 },
 
                 '/' => {
-                    if (kind == .Word) try addToken(&tokens, kind.?, try values.toOwnedSlice());
+                    if (kind == .Word) try addToken(
+                        &tokens, kind.?, try values.toOwnedSlice(),
+                        .{ .line = line, .char = char, .file = null },
+                    );
                     try tokens.append(.{ .Slash = '/' });
                     kind = .Slash;
+                    char += 1;
                 },
 
                 '#' => {
-                    if (kind == .Word) try addToken(&tokens, kind.?, try values.toOwnedSlice());
+                    if (kind == .Word) try addToken(
+                        &tokens, kind.?, try values.toOwnedSlice(),
+                        .{ .line = line, .char = char, .file = null },
+                    );
                     kind = .Hash;
                     while (content.len > i and content[i] != '\n') : (i += 1) {}
+                    char += 1;
                 },
 
                 '\x1b' => {
+                    char += 1;
                     return error.NotImplemented;
                 },
 
-                else => |char| {
-                    try values.append(char);
+                else => |c| {
+                    try values.append(c);
                     if (kind) |k| {
                         switch (k) {
                             .Word => {},
                             .Value => {
-                                if (!std.ascii.isDigit(char)) {
+                                if (!std.ascii.isDigit(c)) {
                                     return error.InvalidExpression;
                                 }
                             },
                             else => {
-                                if (std.ascii.isDigit(char)) {
+                                if (std.ascii.isDigit(c)) {
                                     kind = .Value;
                                 }
                                 kind = .Word;
                             },
                         }
                     } else {
-                        if (std.ascii.isDigit(char)) {
+                        if (std.ascii.isDigit(c)) {
                             kind = .Value;
                         }
                         kind = .Word;
                         continue;
                     }
+                    char += 1;
                 },
             }
         }
@@ -226,7 +263,10 @@ pub const ScriptIter = struct {
         if (kind) |k| {
             switch (k) {
                 .NewLine, .Space => {},
-                else => try addToken(&tokens, k, try values.toOwnedSlice()),
+                else => try addToken(
+                    &tokens, k, try values.toOwnedSlice(),
+                    .{ .line = line, .char = char, .file = null },
+                ),
             }
         }
 
@@ -240,22 +280,22 @@ pub const ScriptIter = struct {
         self.envMap = map;
     }
 
-    fn addToken(list: *std.ArrayList(ScriptToken), kind: TokenKind, value: []const u8) !void {
+    fn addToken(list: *std.ArrayList(ScriptToken), kind: TokenKind, value: []const u8, location: Location) !void {
         switch (kind) {
             .Word => {
-                try list.append(.{ .Word = value });
+                try list.append(.{ .Word = .{ .content = value, .location = location } });
             },
             .Value => {
-                try list.append(.{ .Value = try std.fmt.parseInt(i32, value, 10) });
+                try list.append(.{ .Value = .{ .content = try std.fmt.parseInt(i32, value, 10), .location = location, } });
             },
             .DoubleQuote => {
                 try list.append(.{ .DoubleQuote = value });
             },
             .Space => {
-                try list.append(.{ .Space = ' ' });
+                try list.append(.{ .Space = .{ .content = ' ', .location = location } });
             },
             .NewLine => {
-                try list.append(.{ .NewLine = '\n' });
+                try list.append(.{ .NewLine = .{ .content = '\n', .location = location } });
             },
             .Dot => {
                 try list.append(.{ .Dot = '.' });
@@ -289,8 +329,8 @@ pub const ScriptIter = struct {
 
         while (self.index < self.content.len) : (self.index += 1) {
             switch (self.content[self.index]) {
-                .Word => |val| try argBuffer.appendSlice(val),
-                .Value => |val| try argBuffer.appendSlice(try std.fmt.allocPrint(self.alloc.allocator(), "{d}", .{val})),
+                .Word => |val| try argBuffer.appendSlice(val.content),
+                .Value => |val| try argBuffer.appendSlice(try std.fmt.allocPrint(self.alloc.allocator(), "{d}", .{val.content})),
                 .DoubleQuote => |val| try argBuffer.appendSlice(try std.fmt.allocPrint(self.alloc.allocator(), "{s}", .{val})),
                 .Space => |_| {
                     const arg = try argBuffer.toOwnedSlice();
@@ -346,12 +386,34 @@ pub const ScriptIter = struct {
     }
 };
 
+const Location = struct {
+    line: usize,
+    char: usize,
+    file: ?[]const u8,
+};
+
+fn withLocation(comptime Content: type) type {
+    return struct {
+        content: Content,
+        location: Location,
+
+        const Self = @This();
+
+        fn new(content: Content, line: usize, char: usize, file: ?[]const u8) Self {
+            return .{ 
+                .content = content,
+                .location = .{ .line = line, .char = char, .file = file },
+            };
+        }
+    };
+}
+
 // TODO: Store token location
 const ScriptToken = union(TokenKind) {
-    Word: []const u8,
-    Value: i32,
-    NewLine: u8,
-    Space: u8,
+    Word: withLocation([]const u8),
+    Value: withLocation(i32),
+    NewLine: withLocation(u8),
+    Space: withLocation(u8),
     DoubleQuote: []const u8,
     Dot: u8,
     Slash: u8,
