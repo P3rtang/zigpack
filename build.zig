@@ -61,7 +61,7 @@ pub fn build(b: *std.Build) !void {
     SetupTests(b, test_step, &.{.{
         .name = "script",
         .path = b.path("src/script/test.zig"),
-        .config = .{ .module_deps = &.{"utils"} },
+        .config = .{ .module_deps = &.{ "utils", "debug" } },
     }});
 
     try SetupTestDirs(b, test_step, &.{

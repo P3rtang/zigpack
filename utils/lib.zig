@@ -1,1 +1,1 @@
-usingnamespace @import("iterator.zig");
+pub const Iterator = @import("iterator.zig").Iterator;

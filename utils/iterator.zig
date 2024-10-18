@@ -1,17 +1,17 @@
 pub fn Iterator(comptime Output: type) type {
     return struct {
         const Self = @This();
-        var index = 0;
 
-        nextFn: *const fn (*Self) Output,
+        index: usize = 0,
+        nextFn: *const fn (*Self) ?Output,
 
-        pub fn next(self: *Self) Output {
+        pub fn next(self: *Self) ?Output {
             return self.nextFn(self);
         }
 
-        pub fn peek(self: *Self) Output {
-            const old_index = index;
-            defer index = old_index;
+        pub fn peek(self: *Self) ?Output {
+            const old_index = self.index;
+            defer self.index = old_index;
             return self.next();
         }
 
