@@ -119,14 +119,16 @@ pub const ScriptIter = struct {
                 '\n' => {
                     if (kind) |k| {
                         try addToken(
-                            &tokens, k, try values.toOwnedSlice(),
+                            &tokens,
+                            k,
+                            try values.toOwnedSlice(),
                             .{ .line = line, .char = char, .file = null },
                         );
                     }
-                    try tokens.append(.{ .NewLine = .{ 
+                    try tokens.append(.{ .NewLine = .{
                         .content = '\n',
                         .location = .{ .line = line, .char = char, .file = null },
-                    }});
+                    } });
                     kind = .NewLine;
                     line += 1;
                 },
@@ -134,7 +136,9 @@ pub const ScriptIter = struct {
                 ' ' => {
                     if (kind) |k| {
                         try addToken(
-                            &tokens, k, try values.toOwnedSlice(),
+                            &tokens,
+                            k,
+                            try values.toOwnedSlice(),
                             .{ .line = line, .char = char, .file = null },
                         );
                     }
@@ -198,7 +202,9 @@ pub const ScriptIter = struct {
 
                 '.' => {
                     if (kind == .Word) try addToken(
-                        &tokens, kind.?, try values.toOwnedSlice(),
+                        &tokens,
+                        kind.?,
+                        try values.toOwnedSlice(),
                         .{ .line = line, .char = char, .file = null },
                     );
                     try tokens.append(.{ .Dot = '.' });
@@ -208,7 +214,9 @@ pub const ScriptIter = struct {
 
                 '/' => {
                     if (kind == .Word) try addToken(
-                        &tokens, kind.?, try values.toOwnedSlice(),
+                        &tokens,
+                        kind.?,
+                        try values.toOwnedSlice(),
                         .{ .line = line, .char = char, .file = null },
                     );
                     try tokens.append(.{ .Slash = '/' });
@@ -218,7 +226,9 @@ pub const ScriptIter = struct {
 
                 '#' => {
                     if (kind == .Word) try addToken(
-                        &tokens, kind.?, try values.toOwnedSlice(),
+                        &tokens,
+                        kind.?,
+                        try values.toOwnedSlice(),
                         .{ .line = line, .char = char, .file = null },
                     );
                     kind = .Hash;
@@ -264,7 +274,9 @@ pub const ScriptIter = struct {
             switch (k) {
                 .NewLine, .Space => {},
                 else => try addToken(
-                    &tokens, k, try values.toOwnedSlice(),
+                    &tokens,
+                    k,
+                    try values.toOwnedSlice(),
                     .{ .line = line, .char = char, .file = null },
                 ),
             }
@@ -286,7 +298,10 @@ pub const ScriptIter = struct {
                 try list.append(.{ .Word = .{ .content = value, .location = location } });
             },
             .Value => {
-                try list.append(.{ .Value = .{ .content = try std.fmt.parseInt(i32, value, 10), .location = location, } });
+                try list.append(.{ .Value = .{
+                    .content = try std.fmt.parseInt(i32, value, 10),
+                    .location = location,
+                } });
             },
             .DoubleQuote => {
                 try list.append(.{ .DoubleQuote = value });
@@ -400,7 +415,7 @@ fn withLocation(comptime Content: type) type {
         const Self = @This();
 
         fn new(content: Content, line: usize, char: usize, file: ?[]const u8) Self {
-            return .{ 
+            return .{
                 .content = content,
                 .location = .{ .line = line, .char = char, .file = file },
             };

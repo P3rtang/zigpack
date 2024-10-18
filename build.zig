@@ -31,6 +31,7 @@ pub fn build(b: *std.Build) !void {
         .{ .name = "script", .path = b.path("src/script/mod.zig"), .module_deps = &.{"debug"} },
         .{ .name = "cmd", .path = b.path("cmd/lib.zig"), .module_deps = &.{"string"} },
         .{ .name = "tui", .path = b.path("tui/lib.zig") },
+        .{ .name = "utils", .path = b.path("utils/lib.zig") },
     });
 
     b.installArtifact(main);
@@ -38,6 +39,7 @@ pub fn build(b: *std.Build) !void {
     main.addIncludePath(b.path("src/string.zig"));
     main.addIncludePath(b.path("cmd/lib.zig"));
     main.addIncludePath(b.path("tui/lib.zig"));
+    main.addIncludePath(b.path("utils/lib.zig"));
     main.addIncludePath(b.path("src/debug_print.zig"));
 
     const run_cmd = b.addRunArtifact(main);
@@ -55,6 +57,12 @@ pub fn build(b: *std.Build) !void {
     SetupTests(b, test_step, &.{
         .{ .name = "cmd", .path = b.path("cmd/test.zig"), .config = .{ .module_deps = &.{"string"} } },
     });
+
+    SetupTests(b, test_step, &.{.{
+        .name = "script",
+        .path = b.path("src/script/test.zig"),
+        .config = .{ .module_deps = &.{"utils"} },
+    }});
 
     try SetupTestDirs(b, test_step, &.{
         .{ .path = "testing", .config = .{ .module_deps = &.{ "string", "script", "debug" }, .useLibC = true } },
