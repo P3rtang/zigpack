@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     const main = b.addExecutable(.{
-        .name = "p3desk",
+        .name = "zigpack",
         .root_source_file = .{ .cwd_relative = "src/main.zig" },
         .target = target,
         .optimize = optimize,
@@ -28,10 +28,10 @@ pub fn build(b: *std.Build) !void {
     try SetupModules(b, &main.root_module, &.{
         .{ .name = "string", .path = b.path("src/string.zig") },
         .{ .name = "debug", .path = b.path("src/debug_print.zig") },
-        .{ .name = "script", .path = b.path("src/script/mod.zig"), .module_deps = &.{"debug"} },
+        .{ .name = "utils", .path = b.path("utils/lib.zig") },
+        .{ .name = "script", .path = b.path("src/script/mod.zig"), .module_deps = &.{ "debug", "utils" } },
         .{ .name = "cmd", .path = b.path("cmd/lib.zig"), .module_deps = &.{"string"} },
         .{ .name = "tui", .path = b.path("tui/lib.zig") },
-        .{ .name = "utils", .path = b.path("utils/lib.zig") },
     });
 
     b.installArtifact(main);
@@ -58,19 +58,18 @@ pub fn build(b: *std.Build) !void {
         .{ .name = "cmd", .path = b.path("cmd/test.zig"), .config = .{ .module_deps = &.{"string"} } },
     });
 
-    SetupTests(b, test_step, &.{.{
-        .name = "script",
-        .path = b.path("src/script/test.zig"),
-        .config = .{ .module_deps = &.{ "utils", "debug" } },
-    }});
-
     try SetupTestDirs(b, test_step, &.{
-        .{ .path = "testing", .config = .{ .module_deps = &.{ "string", "script", "debug" }, .useLibC = true } },
+        .{ .path = "testing", .config = .{ .module_deps = &.{ "string", "script", "debug", "utils" }, .useLibC = true } },
     });
 
     const tui_test = b.step("tui", "Run tui unit tests");
     try SetupTestDirs(b, tui_test, &.{
         .{ .path = "tui/testing", .config = .{ .module_deps = &.{"tui"}, .useLibC = true } },
+    });
+
+    const utils_test = b.step("utils", "Run utils unit tests");
+    try SetupTestDirs(b, utils_test, &.{
+        .{ .path = "testing/utils", .config = .{ .module_deps = &.{ "debug", "utils" }, .useLibC = true } },
     });
 
     test_step.dependOn(tui_test);
@@ -114,6 +113,7 @@ fn SetupTest(b: *std.Build, step: *std.Build.Step, t: Test) void {
     for (t.config.module_deps) |dep| {
         c.root_module.addImport(dep, b.modules.get(dep).?);
     }
+
     const run = b.addRunArtifact(c);
     run.has_side_effects = true;
     step.dependOn(&run.step);
@@ -133,6 +133,12 @@ fn SetupTestDir(b: *std.Build, step: *std.Build.Step, test_dir: TestDir) !void {
                 SetupTest(b, step, .{
                     .name = f.name,
                     .path = b.path(b.pathJoin(&.{ test_dir.path, f.name })),
+                    .config = test_dir.config,
+                });
+            },
+            .directory => {
+                try SetupTestDir(b, step, TestDir{
+                    .path = b.pathJoin(&.{ test_dir.path, f.name }),
                     .config = test_dir.config,
                 });
             },
