@@ -1,31 +1,38 @@
 const std = @import("std");
-const super = @import("mod.zig");
+const debug = @import("debug");
+const module = @import("mod.zig");
+const utils = @import("utils");
+const Iterator = utils.IteratorBox;
+const CallbackFn = utils.CallbackFn;
 
 const Self = @This();
 
 stdout: ?*std.io.AnyWriter = null,
 stderr: ?*std.io.AnyWriter = null,
-collect_options: super.CollectOptions = super.CollectOptions{},
+collect_options: module.CollectOptions = module.CollectOptions{},
 
 step: usize = 0,
-steps: []const []const u8,
-iterator: *super.ScriptIter,
+steps: std.ArrayList([]const u8),
+iterator: *Iterator(std.ChildProcess),
 
-pub fn init(iter: *super.ScriptIter) !Self {
-    var iterator = iter;
-    const steps = try iterator.steps();
-    iterator.reset();
+alloc: std.mem.Allocator,
+
+fn call(item: std.ChildProcess) []const u8 {
+    return item.argv[0];
+}
+
+pub fn init(alloc: std.mem.Allocator, iter: *Iterator(std.ChildProcess)) Self {
+    const steps = iter.map([]const u8, call).collect();
+    iter.reset();
+
     return Self{
         .steps = steps,
-        .iterator = iterator,
+        .iterator = iter,
+        .alloc = alloc,
     };
 }
 
-pub fn deinit(self: *const Self) void {
-    self.iterator.deinit();
-}
-
-pub fn collectOutput(self: *Self, stdout: *std.io.AnyWriter, stderr: *std.io.AnyWriter, options: super.CollectOptions) void {
+pub fn collectOutput(self: *Self, stdout: *std.io.AnyWriter, stderr: *std.io.AnyWriter, options: module.CollectOptions) void {
     self.stdout = stdout;
     self.stderr = stderr;
     self.collect_options = options;
@@ -34,7 +41,7 @@ pub fn collectOutput(self: *Self, stdout: *std.io.AnyWriter, stderr: *std.io.Any
 pub fn execNext(self: *Self) !void {
     var alloc = std.heap.GeneralPurposeAllocator(.{}){};
 
-    if (try self.iterator.next()) |child| {
+    if (self.iterator.next()) |child| {
         const pipes = try std.posix.pipe2(.{ .NONBLOCK = true });
         const pid = std.os.linux.fork();
 

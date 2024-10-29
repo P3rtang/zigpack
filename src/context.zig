@@ -61,12 +61,11 @@ pub fn install(_: *Self, cmd: *Cmd) !void {
     const mutex = std.Thread.Mutex{};
 
     if (scripts.getPtr(program)) |p| {
-        var script = try p.scriptContent();
-        var runner = try s.ScriptRunner.init(&script);
+        const script = try p.scriptContent();
+        var runner = s.ScriptRunner.init(arena.allocator(), script);
         runner.collectOutput(&stdout_buf_w, &stdout_buf_w, .{});
-        defer runner.deinit();
 
-        var window_data = WindowData{ .mutex = mutex, .step = runner.step, .steps = runner.steps };
+        var window_data = WindowData{ .mutex = mutex, .step = runner.step, .steps = runner.steps.items };
 
         thread = try std.Thread.spawn(.{}, scriptRunnerThread, .{ &runner, &window_data });
 

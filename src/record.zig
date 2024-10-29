@@ -120,10 +120,17 @@ pub const RecordUI = struct {
         switch (key) {
             .CTRLC => self.is_running = false,
             .ENTER => {
-                var script_iter = try s.ScriptIter.init(self.alloc, self.input_state.input.items, .{});
-                var runner = try s.ScriptRunner.init(&script_iter);
+                var arena = std.heap.ArenaAllocator.init(self.alloc);
+                defer arena.deinit();
+
+                const script_iter = s.parser.Tokenizer.init(&arena, self.input_state.input.items);
+                const process_iter = try s.ProcessIter.init(&arena, script_iter.peekable()).flat_err();
+
+                var runner = s.ScriptRunner.init(self.alloc, process_iter);
+
                 var writer = self.output_stream.writer().any();
                 runner.collectOutput(&writer, &writer, .{});
+
                 runner.exec() catch |err| {
                     try self.output_stream.writer().print("{!}", .{err});
                 };

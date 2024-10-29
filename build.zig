@@ -16,19 +16,14 @@ pub fn build(b: *std.Build) !void {
 
     main.linkLibC();
 
-    const tui = b.addStaticLibrary(std.Build.StaticLibraryOptions{
-        .name = "tui",
-        .root_source_file = b.path("tui/lib.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
+    const utils = b.dependency("utils", .{}).module("iterator");
+    try b.modules.put("utils", utils);
 
-    main.root_module.addImport("tui", &tui.root_module);
+    main.root_module.addImport("utils", utils);
 
     try SetupModules(b, &main.root_module, &.{
         .{ .name = "string", .path = b.path("src/string.zig") },
         .{ .name = "debug", .path = b.path("src/debug_print.zig") },
-        .{ .name = "utils", .path = b.path("utils/lib.zig") },
         .{ .name = "script", .path = b.path("src/script/mod.zig"), .module_deps = &.{ "debug", "utils" } },
         .{ .name = "cmd", .path = b.path("cmd/lib.zig"), .module_deps = &.{"string"} },
         .{ .name = "tui", .path = b.path("tui/lib.zig") },
@@ -65,11 +60,6 @@ pub fn build(b: *std.Build) !void {
     const tui_test = b.step("tui", "Run tui unit tests");
     try SetupTestDirs(b, tui_test, &.{
         .{ .path = "tui/testing", .config = .{ .module_deps = &.{"tui"}, .useLibC = true } },
-    });
-
-    const utils_test = b.step("utils", "Run utils unit tests");
-    try SetupTestDirs(b, utils_test, &.{
-        .{ .path = "testing/utils", .config = .{ .module_deps = &.{ "debug", "utils" }, .useLibC = true } },
     });
 
     test_step.dependOn(tui_test);

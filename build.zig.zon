@@ -41,6 +41,10 @@
         //    // computed. This field and `url` are mutually exclusive.
         //    .path = "foo",
         //},
+        .utils = .{
+            .url = "https://github.com/P3rtang/zig-utils/archive/refs/tags/v0.0.1.tar.gz",
+            .hash = "122087d4d13c156809709dbbf057f28b27cbdb8658785f9fd95808a48f3fae0ff720",
+        },
     },
 
     // Specifies the set of files and directories that are included in this package.
