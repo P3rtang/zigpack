@@ -8,7 +8,11 @@ pub const RecordUI = struct {
     ui: tui.UI,
     update_interval: u32 = 30 * std.time.ns_per_ms,
     is_running: bool = false,
-    input_state: tui.InputState,
+
+    name_input_state: tui.InputState,
+    cmd_input_state: tui.InputState,
+
+    focus: ?*tui.InputState = null,
 
     script: std.ArrayList([]const u8),
     output_stream: std.ArrayList(u8),
@@ -20,7 +24,8 @@ pub const RecordUI = struct {
 
         return Self{
             .ui = ui,
-            .input_state = tui.InputState{ .input = std.ArrayList(u8).init(alloc), .hasFocus = true },
+            .name_input_state = tui.InputState{ .input = std.ArrayList(u8).init(alloc), .hasFocus = false },
+            .cmd_input_state = tui.InputState{ .input = std.ArrayList(u8).init(alloc), .hasFocus = false },
             .script = std.ArrayList([]const u8).init(alloc),
             .output_stream = std.ArrayList(u8).init(alloc),
             .alloc = alloc,
@@ -28,7 +33,8 @@ pub const RecordUI = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.input_state.input.deinit();
+        self.name_input_state.input.deinit();
+        self.cmd_input_state.input.deinit();
         self.script.deinit();
         self.ui.deinit();
     }
@@ -36,6 +42,7 @@ pub const RecordUI = struct {
     pub fn run(self: *Self) !void {
         self.is_running = true;
         while (self.is_running) {
+            self.focus = &self.name_input_state;
             try self.update();
 
             std.time.sleep(self.update_interval);
@@ -51,7 +58,7 @@ pub const RecordUI = struct {
         }
         try self.ui.endWidget();
 
-        if (!self.input_state.hasFocus) {
+        if (!self.cmd_input_state.hasFocus) {
             while (try self.ui.term.?.pollKey()) |key| {
                 try self.handle_key(key);
             }
@@ -64,19 +71,21 @@ pub const RecordUI = struct {
         const layout = try tui.Layout.init(&self.ui, .Vert);
         try self.ui.beginWidget(layout);
         {
-            var cmd_layout = try tui.Layout.init(&self.ui, .Horz);
-            cmd_layout.setBorder(.Rounded);
-            try self.ui.beginWidget(cmd_layout);
+            var name_layout = try tui.Layout.init(&self.ui, .Vert);
+            name_layout.setBorder(.Rounded);
+            try self.ui.beginWidget(name_layout);
             {
-                const input_type = try tui.TextBox.init(&self.ui, "$", .{ .w = 2, .h = 1 });
-                try self.ui.beginWidget(input_type);
+                const text_box = try tui.Layout.init(&self.ui, .Horz);
+                try self.ui.beginWidget(text_box);
                 try self.ui.endWidget();
 
-                var input = try tui.Input(InputKeyHandler).init(&self.ui, &self.input_state, @divFloor(term_size.w, 2) - 3);
-                const key_handler = InputKeyHandler{ .runner = self, .onKeyFn = handle_key };
-                input.key_handler = &key_handler;
-                try self.ui.beginWidget(input);
+                var name_input = try tui.Input(InputKeyHandler).init(&self.ui, &self.name_input_state, @divFloor(term_size.w, 2) - 1);
+                const name_key_handler = InputKeyHandler{ .runner = self, .onKeyFn = handle_key };
+                name_input.key_handler = &name_key_handler;
+                try self.ui.beginWidget(name_input);
                 try self.ui.endWidget();
+
+                try self.CmdInput();
             }
             try self.ui.endWidget();
 
@@ -116,6 +125,32 @@ pub const RecordUI = struct {
         try self.ui.endWidget();
     }
 
+    fn CmdInput(self: *Self) !void {
+        const term_size = try self.ui.term.?.getSize();
+
+        const layout = try tui.Layout.init(&self.ui, .Horz);
+        try self.ui.beginWidget(layout);
+        {
+            const input_type = try tui.TextBox.init(&self.ui, "$", .{ .w = 2, .h = 1 });
+            try self.ui.beginWidget(input_type);
+            try self.ui.endWidget();
+
+            var cmd_input = try tui.Input(InputKeyHandler).init(&self.ui, &self.cmd_input_state, @divFloor(term_size.w, 2) - 3);
+            const cmd_key_handler = InputKeyHandler{ .runner = self, .onKeyFn = handle_key };
+            cmd_input.key_handler = &cmd_key_handler;
+            try self.ui.beginWidget(cmd_input);
+            try self.ui.endWidget();
+        }
+        try self.ui.endWidget();
+    }
+
+    fn handle_name_key(self: *Self, key: tui.Key) !void {
+        switch (key) {
+            .TAB => self.cmd_input_state.hasFocus = true,
+            else => {},
+        }
+    }
+
     fn handle_key(self: *Self, key: tui.Key) !void {
         switch (key) {
             .CTRLC => self.is_running = false,
@@ -123,7 +158,7 @@ pub const RecordUI = struct {
                 var arena = std.heap.ArenaAllocator.init(self.alloc);
                 defer arena.deinit();
 
-                const script_iter = s.parser.Tokenizer.init(&arena, self.input_state.input.items);
+                const script_iter = s.parser.Tokenizer.init(&arena, self.cmd_input_state.input.items);
                 const process_iter = try s.ProcessIter.init(&arena, script_iter.peekable()).flat_err();
 
                 var runner = s.ScriptRunner.init(self.alloc, process_iter);
@@ -135,11 +170,11 @@ pub const RecordUI = struct {
                     try self.output_stream.writer().print("{!}", .{err});
                 };
             },
-            .ESC => self.input_state.hasFocus = false,
+            .ESC => self.cmd_input_state.hasFocus = false,
             .CHAR => |c| {
-                if (!self.input_state.hasFocus) {
+                if (!self.cmd_input_state.hasFocus) {
                     switch (c) {
-                        'i' => self.input_state.hasFocus = true,
+                        'i' => self.cmd_input_state.hasFocus = true,
                         'q' => self.is_running = false,
                         else => {},
                     }

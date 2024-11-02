@@ -15,7 +15,7 @@ pub const Term = struct {
     const stdout_r = std.io.getStdOut().reader();
     const stdout_w = std.io.getStdOut().writer();
 
-    tty: std.fs.File,
+    tty: ?std.fs.File = null,
     termios: std.os.linux.termios,
 
     buffer: std.ArrayList(u8),
@@ -45,9 +45,11 @@ pub const Term = struct {
 
     pub fn deinit(self: *Term) void {
         self.showCursor(.Block) catch {};
-        _ = c.fcntl(self.tty.handle, c.F_SETFL, c.fcntl(self.tty.handle, c.F_GETFL) & ~c.O_NONBLOCK);
         try self.intoCanon();
-        self.tty.close();
+        if (self.tty) |tty| {
+            _ = c.fcntl(tty.handle, c.F_SETFL, c.fcntl(tty.handle, c.F_GETFL) & ~c.O_NONBLOCK);
+            tty.close();
+        }
         self.buffer.deinit();
         self.arena.deinit();
     }
@@ -71,7 +73,9 @@ pub const Term = struct {
 
         try self.writeAll("\x1b[?1049h");
 
-        _ = std.os.linux.tcsetattr(self.tty.handle, .FLUSH, &raw);
+        if (self.tty) |tty| {
+            _ = std.os.linux.tcsetattr(tty.handle, .FLUSH, &raw);
+        }
     }
 
     pub fn intoCanon(self: *Self) !void {
@@ -80,7 +84,9 @@ pub const Term = struct {
         stdout_w.writeAll("\x1B[?47l") catch {};
         stdout_w.writeAll("\x1B[u") catch {};
         stdout_w.writeAll("\x1B[?1049l") catch {};
-        _ = std.os.linux.tcsetattr(self.tty.handle, .FLUSH, &self.termios);
+        if (self.tty) |tty| {
+            _ = std.os.linux.tcsetattr(tty.handle, .FLUSH, &self.termios);
+        }
     }
 
     pub fn clearTerm(self: *Self) !void {
@@ -88,22 +94,28 @@ pub const Term = struct {
     }
 
     fn toggleNonBlock(self: *const Self) !void {
-        if (c.fcntl(self.tty.handle, c.F_SETFL, c.fcntl(self.tty.handle, c.F_GETFL) | c.O_NONBLOCK) != 0) {
-            return error.CouldNotToggle;
+        if (self.tty) |tty| {
+            if (c.fcntl(tty.handle, c.F_SETFL, c.fcntl(tty.handle, c.F_GETFL) | c.O_NONBLOCK) != 0) {
+                return error.CouldNotToggle;
+            }
         }
     }
 
     fn setNonBlock(self: *const Self, set: bool) !void {
-        _ = if (set) {
-            _ = c.fcntl(self.tty.handle, c.F_SETFL, c.fcntl(self.tty.handle, c.F_GETFL) | c.O_NONBLOCK);
-        } else {
-            _ = c.fcntl(self.tty.handle, c.F_SETFL, c.fcntl(self.tty.handle, c.F_GETFL) & ~c.O_NONBLOCK);
-        };
+        if (self.tty) |tty| {
+            _ = if (set) {
+                _ = c.fcntl(tty.handle, c.F_SETFL, c.fcntl(tty.handle, c.F_GETFL) | c.O_NONBLOCK);
+            } else {
+                _ = c.fcntl(tty.handle, c.F_SETFL, c.fcntl(tty.handle, c.F_GETFL) & ~c.O_NONBLOCK);
+            };
+        }
     }
 
     pub fn pollKey(self: *Self) !?Key {
+        if (self.tty == null) return null;
+
         var buffer: [1]u8 = undefined;
-        const size = self.tty.read(&buffer) catch |err| switch (err) {
+        const size = self.tty.?.read(&buffer) catch |err| switch (err) {
             error.WouldBlock => return null,
             else => return error.ReadError,
         };
@@ -125,18 +137,20 @@ pub const Term = struct {
     }
 
     fn getHardwareCursorPos(self: *Self) !Pos {
+        if (self.tty == null) return .{};
+
         errdefer self.deinit();
 
         try self.setNonBlock(false);
         defer self.setNonBlock(true) catch {};
 
-        try self.tty.writer().writeAll("\x1b[6n");
+        try self.tty.?.writer().writeAll("\x1b[6n");
         var buf: [16]u8 = undefined;
         var len: usize = 0;
-        var byte = try self.tty.reader().readByte();
+        var byte = try self.tty.?.reader().readByte();
         while (byte != 'R') : ({
             len += 1;
-            byte = try self.tty.reader().readByte();
+            byte = try self.tty.?.reader().readByte();
         }) {
             buf[len] = byte;
         }

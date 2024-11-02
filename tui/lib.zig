@@ -8,6 +8,7 @@ const c = @cImport({
 pub usingnamespace @import("term.zig");
 pub usingnamespace @import("input.zig");
 pub usingnamespace @import("text_box.zig");
+pub usingnamespace @import("grid.zig");
 
 const WidgetError = error{
     CannotHaveChild,
@@ -49,7 +50,7 @@ pub const Widget = struct {
         self.quad = q;
     }
 
-    fn setQuad(self: *Widget, q: Quad) void {
+    pub fn setQuad(self: *Widget, q: Quad) void {
         self.quad = q;
     }
 
@@ -138,7 +139,7 @@ pub fn BorderedWidget(comptime widget: Widget) type {
         drawFn: *const fn (*Widget) anyerror!void,
         availablePosFn: *const fn (*Widget) WidgetError!Pos,
         addWidgetFn: *const fn (*Widget, *Widget) WidgetError!void,
-        border: BorderStyle,
+        border: BorderStyle = .None,
 
         fn draw(w: *Widget) !void {
             const self = w.castWidget(Self);
@@ -148,7 +149,7 @@ pub fn BorderedWidget(comptime widget: Widget) type {
             try self.drawFn(&self.widget);
         }
 
-        fn cast(self: *Self, comptime T: type) *T {
+        pub fn cast(self: *Self, comptime T: type) *T {
             return @fieldParentPtr("widget", self);
         }
 
@@ -183,11 +184,11 @@ pub fn BorderedWidget(comptime widget: Widget) type {
     return bw;
 }
 
-const BorderStyle = enum {
+pub const BorderStyle = enum {
     None,
     Rounded,
 
-    fn draw(self: BorderStyle, widget: *Widget) !void {
+    pub fn draw(self: BorderStyle, widget: *Widget) !void {
         const quad = widget.getQuad();
         if (widget.term) |term| {
             switch (self) {
@@ -210,7 +211,7 @@ const BorderStyle = enum {
         }
     }
 
-    fn extendQuad(self: BorderStyle, quad: Quad) Quad {
+    pub fn extendQuad(self: BorderStyle, quad: Quad) Quad {
         switch (self) {
             .None => return quad,
             else => return Quad{ .x = quad.x, .y = quad.y, .w = quad.w + 2, .h = quad.h + 2 },
@@ -387,7 +388,6 @@ pub const Layout = struct {
         .drawFn = draw,
         .availablePosFn = availablePos,
         .addWidgetFn = addWidget,
-        .border = .None,
     },
 
     pub fn init(ui: *UI, direction: Direction) !*Layout {
