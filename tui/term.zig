@@ -2,6 +2,8 @@
 // TODO: add a terminal mock to test output
 const std = @import("std");
 const lib = @import("lib.zig");
+
+const Key = lib.Key;
 const Pos = lib.Pos;
 const Quad = lib.Quad;
 const c = @cImport({
@@ -10,9 +12,8 @@ const c = @cImport({
     @cInclude("sys/ioctl.h");
 });
 
-pub const Term = struct {
+const Term = struct {
     const Self = @This();
-    const stdout_r = std.io.getStdOut().reader();
     const stdout_w = std.io.getStdOut().writer();
 
     tty: ?std.fs.File = null,
@@ -22,6 +23,8 @@ pub const Term = struct {
     cursor: Pos,
 
     arena: std.heap.ArenaAllocator,
+
+    writer: std.io.AnyWriter,
 
     pub fn init(alloc: std.mem.Allocator) !Term {
         const tty: std.fs.File = try std.fs.cwd().openFile("/dev/tty", std.fs.File.OpenFlags{ .mode = .read_write });
@@ -321,26 +324,6 @@ pub const Color = struct {
 pub const WrapBehaviour = enum {
     Wrap,
     Nowrap,
-};
-
-pub const Key = union(KeyCode) {
-    CTRLC,
-    BACKSPACE,
-    TAB,
-    ENTER,
-    ESC,
-    DEL,
-    CHAR: u8,
-};
-
-pub const KeyCode = enum(u8) {
-    CTRLC = 3,
-    BACKSPACE = 8,
-    TAB = 9,
-    ENTER = 13,
-    ESC = 27,
-    DEL = 127,
-    CHAR,
 };
 
 pub const CursorType = enum {

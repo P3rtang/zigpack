@@ -30,8 +30,9 @@ pub const TextBox = struct {
         }
 
         if (w.term) |term| {
+            const cursor = try term.cursor();
             const quad = w.getQuad();
-            try term.move(quad.x, quad.y);
+            try cursor.move(.{ .x = quad.x, .y = quad.y });
 
             var row: usize = 0;
             var col: usize = 0;
@@ -40,7 +41,7 @@ pub const TextBox = struct {
                     '\n' => row += 1,
                     '\r' => {},
                     else => {
-                        try term.writeByte(char);
+                        try term.write(&.{char});
                         if (col < quad.w - 1) {
                             col += 1;
                             continue;
@@ -50,7 +51,7 @@ pub const TextBox = struct {
                     },
                 }
                 col = 0;
-                try term.move(quad.x, quad.y + row);
+                try cursor.move(.{ .x = quad.x, .y = quad.y + row });
             }
         }
     }

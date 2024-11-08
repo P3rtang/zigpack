@@ -31,14 +31,19 @@ pub fn CursorWidget(comptime widget: Widget) type {
 
         fn draw(w: *Widget) !void {
             const self = w.castWidget(Self);
+
             try self.drawFn(&self.widget);
             try widget.drawFn(&self.widget);
+
             if (w.term == null) return;
+            const cursor = try w.term.?.cursor();
+
             if (self.hasFocus) {
-                try w.term.?.moveCursor(self.cursor.x, self.cursor.y);
-                try w.term.?.showCursor(.Line);
+                try cursor.move(.{ .x = self.cursor.x, .y = self.cursor.y });
+                try cursor.show();
+                try cursor.setShape(.Line);
             } else {
-                try w.term.?.hideCursor();
+                try cursor.hide();
             }
         }
 
@@ -86,6 +91,8 @@ pub fn Input(comptime KeyHandler: type) type {
 
             if (w.term == null) return;
 
+            const cursor = try w.term.?.cursor();
+
             if (self.state.hasFocus) {
                 while (try w.term.?.pollKey()) |char| {
                     switch (char) {
@@ -106,12 +113,12 @@ pub fn Input(comptime KeyHandler: type) type {
 
             if (input.items.len < w.quad.w + 1) {
                 cw.cursor = tui.Pos{ .x = w.quad.x + input.items.len, .y = w.quad.y };
-                try w.term.?.move(w.quad.x, w.quad.y);
-                try w.term.?.writeAll(input.items);
+                try cursor.move(.{ .x = w.quad.x, .y = w.quad.y });
+                try w.term.?.write(input.items);
             } else {
                 cw.cursor = tui.Pos{ .x = w.quad.x + w.quad.w - 1, .y = w.quad.y };
-                try w.term.?.move(w.quad.x, w.quad.y);
-                try w.term.?.writeAll(input.items[input.items.len - w.quad.w + 1 ..]);
+                try cursor.move(.{ .x = w.quad.x, .y = w.quad.y });
+                try w.term.?.write(input.items[input.items.len - w.quad.w + 1 ..]);
             }
         }
     };

@@ -1,6 +1,5 @@
 const std = @import("std");
-const Term = @import("term.zig").Term;
-const Window = @import("term.zig").Window;
+const t = @import("term/mod.zig");
 const c = @cImport({
     @cInclude("stdio.h");
     @cInclude("termios.h");
@@ -9,6 +8,10 @@ pub usingnamespace @import("term.zig");
 pub usingnamespace @import("input.zig");
 pub usingnamespace @import("text_box.zig");
 pub usingnamespace @import("grid.zig");
+pub usingnamespace @import("term/mod.zig");
+
+const Term = t.Term;
+const Window = @import("term.zig").Window;
 
 const WidgetError = error{
     CannotHaveChild,
@@ -191,20 +194,21 @@ pub const BorderStyle = enum {
     pub fn draw(self: BorderStyle, widget: *Widget) !void {
         const quad = widget.getQuad();
         if (widget.term) |term| {
+            const cursor = try term.cursor();
             switch (self) {
                 .Rounded => {
                     try term.drawHorzLine(.{ .x = quad.x, .y = quad.y }, quad.w);
                     try term.drawHorzLine(.{ .x = quad.x, .y = quad.y + quad.h - 1 }, quad.w);
                     try term.drawVertLine(.{ .x = quad.x, .y = quad.y }, quad.h);
                     try term.drawVertLine(.{ .x = quad.x + quad.w - 1, .y = quad.y }, quad.h);
-                    try term.move(quad.x, quad.y);
-                    try term.writeAll("╭");
-                    try term.move(quad.x + quad.w - 1, quad.y);
-                    try term.writeAll("╮");
-                    try term.move(quad.x, quad.y + quad.h - 1);
-                    try term.writeAll("╰");
-                    try term.move(quad.x + quad.w - 1, quad.y + quad.h - 1);
-                    try term.writeAll("╯");
+                    try cursor.move(.{ .x = quad.x, .y = quad.y });
+                    try term.write("╭");
+                    try cursor.move(.{ .x = quad.x + quad.w - 1, .y = quad.y });
+                    try term.write("╮");
+                    try cursor.move(.{ .x = quad.x, .y = quad.y + quad.h - 1 });
+                    try term.write("╰");
+                    try cursor.move(.{ .x = quad.x + quad.w - 1, .y = quad.y + quad.h - 1 });
+                    try term.write("╯");
                 },
                 .None => {},
             }
@@ -287,11 +291,12 @@ pub const UI = struct {
 
     arena: std.heap.ArenaAllocator,
 
-    pub fn init(alloc: std.mem.Allocator) !Self {
-        var term = try Term.init(alloc);
-        try term.intoRaw();
-        try term.clearTerm();
-        try term.move(1, 1);
+    pub fn init(alloc: std.mem.Allocator, term: Term) !Self {
+        var termVar = term;
+        try termVar.intoRaw();
+        try termVar.clearTerm();
+        var cursor = try termVar.cursor();
+        try cursor.move(.{ .x = 1, .y = 1 });
         return UI{
             .background = @intCast(0xff00ff),
             .border = .None,
@@ -301,17 +306,7 @@ pub const UI = struct {
         };
     }
 
-    pub fn initStub(alloc: std.mem.Allocator) Self {
-        return UI{
-            .background = @intCast(0xff00ff),
-            .border = .None,
-            .widgets = std.DoublyLinkedList(*Widget){},
-            .arena = std.heap.ArenaAllocator.init(alloc),
-        };
-    }
-
     pub fn deinit(self: *Self) void {
-        if (self.term) |*t| t.deinit();
         self.arena.deinit();
     }
 
@@ -349,14 +344,14 @@ pub const UI = struct {
 
         var w = widget.getWidget();
         w.setPos(pos);
-        if (self.term) |*t| w.term = t;
+        if (self.term) |*term| w.term = term;
         const new_node = try self.arena.allocator().create(std.DoublyLinkedList(*Widget).Node);
         new_node.* = std.DoublyLinkedList(*Widget).Node{ .prev = self.widgets.last, .data = w };
         self.widgets.append(new_node);
     }
 
     pub fn endWidget(self: *Self) !void {
-        var widget = self.widgets.pop().?;
+        const widget = self.widgets.pop().?;
         defer self.arena.allocator().destroy(widget);
         try widget.data.draw();
 

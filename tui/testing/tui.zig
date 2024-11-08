@@ -1,10 +1,17 @@
 const std = @import("std");
 const tui = @import("tui");
+const MockTerm = @import("mock.zig").MockTerm;
 
+const alloc = std.testing.allocator;
 test "widget_interface" {
-    const alloc = std.testing.allocator;
-    var ui = tui.UI.initStub(alloc);
-    defer ui.deinit();
+    var mock_term = MockTerm(200, 100).init(alloc);
+    var ui = try tui.UI.init(alloc, mock_term.term());
+
+    defer {
+        mock_term.deinit();
+        ui.deinit();
+    }
+
     try std.testing.expectEqualDeep(tui.Quad{}, ui.widget.quad);
 
     {
@@ -17,10 +24,14 @@ test "widget_interface" {
 }
 
 test "layout_border" {
-    const alloc = std.testing.allocator;
     {
-        var ui = tui.UI.initStub(alloc);
-        defer ui.deinit();
+        var mock_term = MockTerm(200, 100).init(alloc);
+        var ui = try tui.UI.init(alloc, mock_term.term());
+
+        defer {
+            mock_term.deinit();
+            ui.deinit();
+        }
 
         const layout = try tui.Layout.init(&ui, .Vert);
         try ui.beginWidget(layout);
@@ -41,8 +52,13 @@ test "layout_border" {
         try std.testing.expectEqualDeep(tui.Quad{ .x = 0, .y = 0, .w = 40, .h = 20 }, layout.getAnyQuad());
     }
     {
-        var ui = tui.UI.initStub(alloc);
-        defer ui.deinit();
+        var mock_term = MockTerm(200, 100).init(alloc);
+        var ui = try tui.UI.init(alloc, mock_term.term());
+
+        defer {
+            mock_term.deinit();
+            ui.deinit();
+        }
 
         var layout = try tui.Layout.init(&ui, .Vert);
         layout.setBorder(.Rounded);
@@ -75,11 +91,16 @@ test "textbox_height" {
         }
     };
 
-    var ui = tui.UI.initStub(std.testing.allocator);
-    defer ui.deinit();
+    var mock_term = MockTerm(200, 100).init(alloc);
+    var ui = try tui.UI.init(alloc, mock_term.term());
+
+    defer {
+        mock_term.deinit();
+        ui.deinit();
+    }
 
     var input_state = tui.InputState{
-        .input = std.ArrayList(u8).init(std.testing.allocator),
+        .input = std.ArrayList(u8).init(alloc),
     };
 
     var layout = try tui.Layout.init(&ui, .Horz);

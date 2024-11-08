@@ -18,8 +18,8 @@ pub fn Grid(comptime R: usize, comptime C: usize) type {
             .addWidgetFn = addWidget,
         },
 
-        pub fn init(alloc: std.mem.Allocator) !*Self {
-            const self = try alloc.create(Self);
+        pub fn init(ui: *super.UI) !*Self {
+            const self = try ui.arena.allocator().create(Self);
             self.* = .{};
             return self;
         }
@@ -30,9 +30,6 @@ pub fn Grid(comptime R: usize, comptime C: usize) type {
 
             w.setQuad(self.border.extendQuad(w.getQuad()));
             try self.border.draw(self.getWidget());
-
-            try w.drawFn(self.getWidget());
-            // try self.drawFn(&self.widget);
         }
 
         pub fn getWidget(self: *Self) *super.Widget {
@@ -46,7 +43,8 @@ pub fn Grid(comptime R: usize, comptime C: usize) type {
         }
 
         fn addWidget(w: *super.Widget, child: *super.Widget) !void {
-            const self = w.castWidget(Self);
+            const bw = w.castWidget(BW);
+            const self = bw.cast(Self);
             _ = child;
             _ = self;
         }
@@ -68,14 +66,14 @@ pub fn GridItems(comptime R: usize, comptime C: usize) type {
     return struct {
         const Self = @This();
 
-        var position: usize = 0;
+        position: usize = 0,
         children: [R * C]GridItemWidget = undefined,
 
         pub fn insert(self: *Self, widget: GridItemWidget) !void {
-            const insert_index = position;
-            position += widget.span.col * widget.span.row;
+            const insert_index = self.position;
+            self.position += widget.span.col * widget.span.row;
 
-            if (position > R * C - 1) {
+            if (self.position > R * C) {
                 return error.ChildOutsideGrid;
             }
 

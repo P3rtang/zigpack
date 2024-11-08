@@ -1,10 +1,19 @@
 const std = @import("std");
 const tui = @import("tui");
+const MockTerm = @import("mock.zig").MockTerm;
 
+const alloc = std.testing.allocator;
 test "default-grid" {
-    var ui = try tui.UI.init(std.testing.allocator);
+    var mock_term = MockTerm(200, 100).init(alloc);
+    var ui = try tui.UI.init(alloc, mock_term.term());
 
-    const grid = try tui.Grid(2, 2).init(std.testing.allocator);
+    defer {
+        mock_term.deinit();
+        ui.deinit();
+    }
+
+    const grid = try tui.Grid(2, 2).init(&ui);
+
     const layout_1 = try tui.Layout.init(&ui, .Horz);
     const layout_2 = try tui.Layout.init(&ui, .Horz);
     const layout_3 = try tui.Layout.init(&ui, .Horz);
@@ -17,4 +26,6 @@ test "default-grid" {
 
     try ui.beginWidget(grid);
     try ui.endWidget();
+
+    std.debug.print("{s}", .{mock_term.buffer});
 }
